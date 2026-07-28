@@ -5,20 +5,20 @@
  * No external dependencies — works with Vite bundling.
  */
 
-// ── ARUCO Dictionary (1024 markers, 5x5 bit patterns) ────
-// Each entry is a 5-row pattern. Bit 1 = black cell.
-const ARUCO_DICT = [
-  [1,0,0,0,0,1,1,1,0,1,0,1,0,1,0,1,0,0,0,1,0,1,1,1,0],
-  [1,0,0,0,0,1,1,1,0,1,0,1,1,0,0,0,1,1,1,0,0,1,1,1,0],
-  [0,0,0,1,1,0,0,1,0,1,0,1,1,0,1,0,1,1,0,1,1,0,1,1,1],
-  [0,0,0,1,1,0,0,1,0,1,0,1,0,1,1,1,0,0,1,0,1,0,1,1,1],
-  [0,0,0,1,0,0,0,1,0,1,0,0,1,1,0,0,0,0,1,0,0,1,0,1,1],
-  [0,1,1,0,0,0,1,0,0,1,0,0,1,0,0,0,1,0,0,1,1,1,0,1,1],
-  [0,1,1,0,0,0,1,0,0,1,0,1,0,1,0,1,0,1,0,0,1,0,0,1,1],
-  [0,1,1,0,0,0,0,0,0,1,0,1,0,0,0,0,0,0,0,0,1,1,0,0,1],
-  [0,1,1,0,0,1,0,0,0,1,0,1,1,0,0,1,0,1,1,0,1,0,1,1,1],
-  [0,1,1,0,0,1,0,1,0,1,0,0,1,0,0,0,1,0,0,0,1,1,1,0,1],
-];
+// ── Marker dictionary — must match CardGeneratorPage exactly ─
+// Keys are card IDs, values are 5x5 bit patterns (1=black, 0=white)
+const MARKER_DICT = {
+  1:  [0,1,0,0,0, 0,1,1,0,1, 0,0,0,1,1, 1,0,1,0,1, 0,0,1,0,0],
+  2:  [0,1,1,0,0, 0,1,0,0,1, 0,0,1,0,0, 1,1,0,0,1, 0,0,0,0,1],
+  3:  [0,0,1,1,0, 0,0,0,1,1, 0,1,0,1,0, 0,1,1,0,0, 0,1,0,1,1],
+  4:  [0,0,0,1,0, 1,0,0,0,1, 0,1,0,0,0, 0,0,0,1,1, 1,1,0,0,0],
+  5:  [0,0,0,0,1, 1,1,0,0,0, 0,0,1,0,1, 1,0,0,1,0, 0,0,1,1,0],
+  6:  [0,1,0,1,0, 1,0,1,0,0, 0,0,0,0,1, 0,1,0,0,1, 1,0,1,0,0],
+  7:  [1,0,0,1,0, 0,1,0,1,0, 0,0,0,0,0, 0,1,0,1,0, 1,0,0,1,1],
+  8:  [1,0,1,0,0, 0,0,1,0,0, 0,1,0,0,0, 0,0,1,0,1, 0,1,0,0,1],
+  9:  [0,1,1,1,0, 1,0,0,0,1, 1,0,1,0,1, 1,0,0,0,1, 0,1,1,1,0],
+  10: [1,1,0,0,1, 0,0,0,1,1, 0,1,0,0,0, 1,1,0,0,0, 0,0,1,1,0],
+};
 
 // ── Perspective transform helpers ─────────────────────────
 function PerspT(src, dst) {
@@ -207,37 +207,6 @@ function readBits(imageData, corners, N = 7) {
   return bits;
 }
 
-function extractId(bits) {
-  // Border must be all black (1), inner 5x5 contains id
-  // Check border
-  for (let i = 0; i < 7; i++) {
-    if (bits[i] === 0) return -1; // top border
-    if (bits[42+i] === 0) return -1; // bottom border
-    if (bits[i*7] === 0) return -1; // left border
-    if (bits[i*7+6] === 0) return -1; // right border
-  }
-
-  // Extract inner 5x5
-  const inner = [];
-  for (let r = 1; r <= 5; r++) {
-    for (let c = 1; c <= 5; c++) {
-      inner.push(bits[r*7+c]);
-    }
-  }
-
-  // Try all 4 rotations and find best match in dictionary
-  // ARUCO uses a simple binary encoding
-  let bestId = -1, bestRot = 0;
-  for (let rot = 0; rot < 4; rot++) {
-    const rotated = rotate5x5(inner, rot);
-    // Convert 5 rows of 5 bits each to ID
-    // Each row is a word, hamming-coded
-    const id = decodeBits(rotated);
-    if (id >= 0) { bestId = id; bestRot = rot; break; }
-  }
-  return bestId;
-}
-
 function rotate5x5(bits, times) {
   let b = [...bits];
   for (let t = 0; t < times; t++) {
@@ -250,18 +219,44 @@ function rotate5x5(bits, times) {
   return b;
 }
 
-function decodeBits(bits) {
-  // Simple approach: treat 5x5 = 25 bits as an integer ID
-  // This matches the ARUCO dictionary encoding
-  let id = 0;
-  // Use rows 0,1,2,3,4 as 5-bit words, check parity per ARUCO spec
-  // For simplicity, encode as binary and look up in a small table
-  for (let i = 0; i < 25; i++) {
-    id = (id << 1) | bits[i];
-  }
-  // Return id mod 1024 (ARUCO has 1024 markers)
-  return id % 1024;
+function hammingDistance(a, b) {
+  let d = 0;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) d++;
+  return d;
 }
+
+function extractId(bits) {
+  // Border must be mostly black
+  let borderBlack = 0;
+  for (let i = 0; i < 7; i++) {
+    if (bits[i] === 1) borderBlack++;
+    if (bits[42+i] === 1) borderBlack++;
+    if (bits[i*7] === 1) borderBlack++;
+    if (bits[i*7+6] === 1) borderBlack++;
+  }
+  if (borderBlack < 18) return -1;
+
+  // Extract inner 5x5
+  const inner = [];
+  for (let r = 1; r <= 5; r++)
+    for (let c = 1; c <= 5; c++)
+      inner.push(bits[r*7+c]);
+
+  // Try all 4 rotations, find closest match in our dictionary
+  let bestId = -1, bestDist = 4;
+  for (let rot = 0; rot < 4; rot++) {
+    const rotated = rotate5x5(inner, rot);
+    for (const [id, pattern] of Object.entries(MARKER_DICT)) {
+      const dist = hammingDistance(rotated, pattern);
+      if (dist < bestDist) {
+        bestDist = dist;
+        bestId = parseInt(id);
+      }
+    }
+  }
+  return bestId;
+}
+
 
 // ── Main Detector ─────────────────────────────────────────
 export class ArucoDetector {

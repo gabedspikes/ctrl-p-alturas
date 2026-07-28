@@ -1,6 +1,6 @@
 import { ArucoDetector } from '../lib/aruco-detector.js'
 import React, { useEffect, useRef, useState, useCallback } from 'react'
-import { useParams, useSearchParams } from 'react-router-dom'
+import { useParams, useSearchParams, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 
 // ── Answer from ArUco corner rotation ───────────────────
@@ -25,6 +25,7 @@ const ANS_HEX    = { A: '#e8ff47', B: '#47c8ff', C: '#ffa500', D: '#ff4757' }
 export default function ScanPage() {
   const { sessionId } = useParams()
   const [searchParams] = useSearchParams()
+  const navigate = useNavigate()
   const slideId = searchParams.get('slide')
 
   const videoRef   = useRef(null)
@@ -87,6 +88,15 @@ export default function ScanPage() {
         event: 'UPDATE', schema: 'public', table: 'sessions',
         filter: `id=eq.${sessionId}`
       }, async payload => {
+        // If session finished, stop camera and redirect
+        if (payload.new.status === 'finished') {
+          if (videoRef.current?.srcObject) {
+            videoRef.current.srcObject.getTracks().forEach(t => t.stop())
+          }
+          if (rafRef.current) cancelAnimationFrame(rafRef.current)
+          navigate('/')
+          return
+        }
         const newSlideId = payload.new.current_slide_id
         if (newSlideId && newSlideId !== currentSlideId) {
           setCurrentSlideId(newSlideId)

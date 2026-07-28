@@ -6,6 +6,7 @@ import PresentationsPage from './pages/PresentationsPage'
 import SlideEditorPage from './pages/SlideEditorPage'
 import SessionPage from './pages/SessionPage'
 import ScanPage from './pages/ScanPage'
+import CardGeneratorPage from './pages/CardGeneratorPage'
 import './styles.css'
 
 function Layout({ children }) {
@@ -16,6 +17,7 @@ function Layout({ children }) {
         <div className="nav-links">
           <NavLink to="/" end className={({isActive}) => isActive ? 'active' : ''}>Classes</NavLink>
           <NavLink to="/presentations" className={({isActive}) => isActive ? 'active' : ''}>Tests</NavLink>
+          <NavLink to="/cards" className={({isActive}) => isActive ? 'active' : ''}>Cards</NavLink>
         </div>
       </nav>
       <main className="main">{children}</main>
@@ -31,6 +33,7 @@ ReactDOM.createRoot(document.getElementById('root')).render(
       <Route path="/presentations/:id/edit" element={<SlideEditorPage />} />
       <Route path="/sessions/:id" element={<SessionPage />} />
       <Route path="/scan/:sessionId" element={<ScanPage />} />
+      <Route path="/cards" element={<CardGeneratorPage />} />
     </Routes>
   </BrowserRouter>
 )
