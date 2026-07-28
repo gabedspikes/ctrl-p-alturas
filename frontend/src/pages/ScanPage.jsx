@@ -132,43 +132,36 @@ export default function ScanPage() {
     }
   }, [status])
 
-  // ── Load ArUco detector ──────────────────────────────────
-  useEffect(() => {
-    if (!camReady) return
-    import('js-aruco2').then(mod => {
-  // js-aruco2 exports AR as a named export or nested under default
-  const AR = mod.AR || mod.default?.AR || mod.default || mod
-  
-  // Try each possible constructor location
-  let detector
-  try {
-    if (AR.Detector) {
-      detector = new AR.Detector({ dictionaryName: 'ARUCO' })
-    } else if (mod.Detector) {
-      detector = new mod.Detector({ dictionaryName: 'ARUCO' })
-    } else {
-      // Last resort: find Detector anywhere in the exports
-      const keys = Object.keys(mod)
-      for (const key of keys) {
-        if (mod[key]?.Detector) {
-          detector = new mod[key].Detector({ dictionaryName: 'ARUCO' })
-          break
-        }
-      }
-    }
-  } catch(e) {
-    throw new Error(`Could not instantiate detector: ${e.message}. Module keys: ${Object.keys(mod).join(', ')}`)
-  }
+  // ── Load ArUco detector via CDN script tag ───────────────
+useEffect(() => {
+  if (!camReady) return
 
-  if (!detector) throw new Error(`Detector not found. Module keys: ${Object.keys(mod).join(', ')}`)
-  detectorRef.current = detector
-  startDetectionLoop()
-}).catch(err => {
-  setError(`ArUco library failed to load: ${err.message}`)
-  setStatus('error')
-})
-    return () => { if (rafRef.current) cancelAnimationFrame(rafRef.current) }
-  }, [camReady])
+  // Load js-aruco2 from CDN as a global script — avoids Vite bundling issues
+  const script = document.createElement('script')
+  script.src = 'https://cdn.jsdelivr.net/npm/js-aruco2@latest/src/aruco.js'
+  script.onload = () => {
+    try {
+      // After script loads, AR is available as a global
+      const AR = window.AR
+      if (!AR || !AR.Detector) throw new Error('AR.Detector not found after script load')
+      detectorRef.current = new AR.Detector({ dictionaryName: 'ARUCO' })
+      startDetectionLoop()
+    } catch(e) {
+      setError(`ArUco init failed: ${e.message}`)
+      setStatus('error')
+    }
+  }
+  script.onerror = () => {
+    setError('Failed to load ArUco library from CDN. Check your internet connection.')
+    setStatus('error')
+  }
+  document.head.appendChild(script)
+
+  return () => {
+    if (rafRef.current) cancelAnimationFrame(rafRef.current)
+    document.head.removeChild(script)
+  }
+}, [camReady])
 
   // ── Detection loop ───────────────────────────────────────
   const startDetectionLoop = useCallback(() => {
