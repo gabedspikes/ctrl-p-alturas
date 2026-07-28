@@ -1,3 +1,4 @@
+import { ArucoDetector } from '../lib/aruco-detector.js'
 import React, { useEffect, useRef, useState, useCallback } from 'react'
 import { useParams, useSearchParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
@@ -132,36 +133,18 @@ export default function ScanPage() {
     }
   }, [status])
 
-  // ── Load ArUco detector via CDN script tag ───────────────
-useEffect(() => {
-  if (!camReady) return
-
-  // Load js-aruco2 from CDN as a global script — avoids Vite bundling issues
-  const script = document.createElement('script')
-  script.src = 'https://cdn.jsdelivr.net/npm/js-aruco2@latest/src/aruco.js'
-  script.onload = () => {
+  // ── Load ArUco detector (local ES module — no CDN needed) ──
+  useEffect(() => {
+    if (!camReady) return
     try {
-      // After script loads, AR is available as a global
-      const AR = window.AR
-      if (!AR || !AR.Detector) throw new Error('AR.Detector not found after script load')
-      detectorRef.current = new AR.Detector({ dictionaryName: 'ARUCO' })
+      detectorRef.current = new ArucoDetector()
       startDetectionLoop()
     } catch(e) {
       setError(`ArUco init failed: ${e.message}`)
       setStatus('error')
     }
-  }
-  script.onerror = () => {
-    setError('Failed to load ArUco library from CDN. Check your internet connection.')
-    setStatus('error')
-  }
-  document.head.appendChild(script)
-
-  return () => {
-    if (rafRef.current) cancelAnimationFrame(rafRef.current)
-    document.head.removeChild(script)
-  }
-}, [camReady])
+    return () => { if (rafRef.current) cancelAnimationFrame(rafRef.current) }
+  }, [camReady])
 
   // ── Detection loop ───────────────────────────────────────
   const startDetectionLoop = useCallback(() => {
