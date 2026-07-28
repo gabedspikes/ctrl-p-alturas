@@ -13,7 +13,7 @@ function Layout({ children }) {
   return (
     <div className="app">
       <nav className="nav">
-        <span className="nav-logo">◈ PLICKERS</span>
+        <span className="nav-logo">◈ CTRL-P-ALT</span>
         <div className="nav-links">
           <NavLink to="/" end className={({isActive}) => isActive ? 'active' : ''}>Classes</NavLink>
           <NavLink to="/presentations" className={({isActive}) => isActive ? 'active' : ''}>Tests</NavLink>
