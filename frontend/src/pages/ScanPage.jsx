@@ -4,23 +4,70 @@ import { useParams, useSearchParams, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 
 // ── Answer from ArUco corner rotation ───────────────────
-// corners = [[TL, TR, BR, BL]] each point is {x, y}
-// The edge whose midpoint has the LOWEST y = pointing UP = chosen answer
-// A=top up, B=right up, C=bottom up, D=left up
-function cornersToAnswer(corners) {
-  const [tl, tr, br, bl] = corners
-  const edges = {
-    A: (tl.y + tr.y) / 2,  // top edge
-    B: (tr.y + br.y) / 2,  // right edge
-    C: (br.y + bl.y) / 2,  // bottom edge
-    D: (bl.y + tl.y) / 2,  // left edge
+// corners are sorted clockwise by angle from centroid: [tl, tr, br, bl]
+// The detector also returns the rotation index (0-3) indicating how many
+// 90° CW rotations were applied to match the canonical pattern.
+// We use the physical position of the topmost edge to determine answer.
+//
+// The key insight: corners come sorted clockwise from the detector.
+// corners[0] = top-left in the CANONICAL (unrotated) orientation.
+// When the card is rotated, corners[0] moves to a different screen position.
+// Whichever corner is physically highest on screen (lowest y) is corners[0].
+// That tells us which label is pointing up:
+//   corners[0] at top-left  → A is up (0° rotation, normal)
+//   corners[0] at top-right → B is up (90° CW rotation)
+//   corners[0] at bot-right → C is up (180° rotation)
+//   corners[0] at bot-left  → D is up (270° CW rotation)
+//
+// But since we sort clockwise, corners[0] is always the top-left of the
+// detected quad. Instead we use rotation from the detector directly.
+// Fallback: use the centroid of the top edge (average of 2 highest corners).
+function cornersToAnswer(corners, rotation) {
+  // If detector provided rotation, use it directly
+  if (rotation !== undefined) {
+    return ['A', 'B', 'C', 'D'][rotation % 4]
   }
-  return Object.entries(edges).reduce((a, b) => a[1] < b[1] ? a : b)[0]
+
+  // Fallback: find which edge is highest (lowest y on screen)
+  // corners are in clockwise order [0,1,2,3]
+  // edges: 0-1=top, 1-2=right, 2-3=bottom, 3-0=left IN CANONICAL ORIENTATION
+  // But after rotation we need to find which edge is physically at top
+
+  // Find the two corners with the lowest y values (highest on screen)
+  const sorted = [...corners].sort((a, b) => a.y - b.y)
+  const topTwo = sorted.slice(0, 2)
+
+  // Find which edge these two corners belong to
+  const idx0 = corners.indexOf(topTwo[0])
+  const idx1 = corners.indexOf(topTwo[1])
+  const diff = Math.abs(idx0 - idx1)
+
+  // Adjacent corners (diff=1 or diff=3) form an edge
+  const minIdx = Math.min(idx0, idx1)
+
+  // Map edge index to answer
+  // Edge 0-1 = first edge of canonical quad
+  // Rotation 0: edge 0-1 is top → A
+  // Rotation 1: edge 1-2 is top → B  
+  // Rotation 2: edge 2-3 is top → C
+  // Rotation 3: edge 3-0 is top → D
+  if (diff === 1) return ['A', 'B', 'C', 'D'][minIdx]
+  if (diff === 3) return 'D' // edge 3-0
+  
+  // Diagonal corners — use the average y of top edge as tiebreaker
+  const cx = corners.reduce((s, c) => s + c.x, 0) / 4
+  const cy = corners.reduce((s, c) => s + c.y, 0) / 4
+  // Which quadrant is the topmost corner in?
+  const top = sorted[0]
+  if (top.x < cx && top.y < cy) return 'A' // top-left
+  if (top.x > cx && top.y < cy) return 'B' // top-right
+  if (top.x > cx && top.y > cy) return 'C' // bottom-right
+  return 'D'
 }
 
 // ── Answer colors ────────────────────────────────────────
-const ANS_COLORS = { A: '#4772ff', B: '#47c8ff', C: '#006aff', D: '#ff4757' }
-const ANS_HEX    = { A: '#4772ff', B: '#47c8ff', C: '#006aff', D: '#ff4757' }
+const ANS_COLORS = { A: '#e8ff47', B: '#47c8ff', C: '#ffa500', D: '#ff4757' }
+const ANS_HEX    = { A: '#e8ff47', B: '#47c8ff', C: '#ffa500', D: '#ff4757' }
 
 export default function ScanPage() {
   const { sessionId } = useParams()
@@ -183,8 +230,8 @@ export default function ScanPage() {
           const markers = detectorRef.current?.detect(imageData) || []
           markers.forEach(marker => {
             const cardId = marker.id
-            const corners = marker.corners  // [{x,y}, {x,y}, {x,y}, {x,y}]
-            const answer  = cornersToAnswer(corners)
+            const corners = marker.corners
+            const answer  = cornersToAnswer(corners, marker.rotation)
             const student = studentsRef.current[cardId]
             const alreadyScanned = scannedRef.current[cardId]
             const now = Date.now()
@@ -294,7 +341,7 @@ export default function ScanPage() {
 
   if (status !== 'ready' && status !== 'init') return (
     <div style={styles.loadingScreen}>
-      <div style={{ color: '#4772ff', fontSize: '1.5rem' }}>◈</div>
+      <div style={{ color: '#e8ff47', fontSize: '1.5rem' }}>◈</div>
       <p style={{ color: '#888', marginTop: '.5rem' }}>Loading session…</p>
     </div>
   )
@@ -309,7 +356,7 @@ export default function ScanPage() {
           <span style={styles.className}>{sessionInfo?.courses?.name}</span>
         </div>
         <div style={styles.counter}>
-          <span style={{ color: '#4772ff', fontWeight: 800, fontSize: '1.2rem' }}>{scannedCount}</span>
+          <span style={{ color: '#e8ff47', fontWeight: 800, fontSize: '1.2rem' }}>{scannedCount}</span>
           <span style={{ color: '#555', fontSize: '.75rem' }}>/ {totalStudents}</span>
         </div>
       </div>
@@ -331,7 +378,7 @@ export default function ScanPage() {
         {!camReady && (
           <div style={styles.camPrompt}>
             <div style={{ fontSize: '3rem', marginBottom: '.5rem' }}>📷</div>
-            <p style={{ color: '#4772ff', fontWeight: 700 }}>
+            <p style={{ color: '#e8ff47', fontWeight: 700 }}>
               {status === 'loading' ? 'Loading…' : 'Starting camera…'}
             </p>
             <p style={{ color: '#666', fontSize: '.8rem', marginTop: '.35rem' }}>
@@ -392,7 +439,7 @@ const styles = {
     padding: '.75rem 1rem', background: '#141417',
     borderBottom: '1px solid #2a2a30', position: 'sticky', top: 0, zIndex: 10,
   },
-  logo: { color: '#4772ff', fontWeight: 800, fontSize: '.9rem', letterSpacing: '.1em' },
+  logo: { color: '#e8ff47', fontWeight: 800, fontSize: '.9rem', letterSpacing: '.1em' },
   headerInfo: { flex: 1, display: 'flex', flexDirection: 'column' },
   sessionName: { fontSize: '.8rem', fontWeight: 700 },
   className: { fontSize: '.7rem', color: '#555' },
@@ -435,7 +482,7 @@ const styles = {
   cardBadge: {
     fontSize: '.65rem', fontWeight: 700, padding: '.15rem .4rem',
     borderRadius: 99, background: 'rgba(232,255,71,.12)',
-    color: '#4772ff', fontFamily: 'monospace',
+    color: '#e8ff47', fontFamily: 'monospace',
   },
   studentName: { flex: 1, fontSize: '.8rem' },
   errorScreen: {

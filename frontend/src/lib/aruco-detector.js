@@ -206,18 +206,18 @@ function rotate5x5(bits, times) {
   return b
 }
 
-// ── Match against dictionary ──────────────────────────────
+// ── Match against dictionary — returns {id, rotation} ────
 function matchDict(inner) {
-  let bestId = -1, bestDist = 5 // threshold: allow up to 4 bit errors
+  let bestId = -1, bestDist = 5, bestRot = 0
   for (let rot = 0; rot < 4; rot++) {
     const rotated = rotate5x5(inner, rot)
     for (const [id, pattern] of Object.entries(MARKER_DICT)) {
       let dist = 0
       for (let i = 0; i < 25; i++) if (rotated[i] !== pattern[i]) dist++
-      if (dist < bestDist) { bestDist = dist; bestId = parseInt(id) }
+      if (dist < bestDist) { bestDist = dist; bestId = parseInt(id); bestRot = rot }
     }
   }
-  return bestId
+  return { id: bestId, rotation: bestRot }
 }
 
 // ── Main Detector class ───────────────────────────────────
@@ -246,15 +246,11 @@ export class ArucoDetector {
       if (!inner) continue
 
       // Match against dictionary
-      const id = matchDict(inner)
+      const { id, rotation } = matchDict(inner)
       if (id < 0 || seen.has(id)) continue
       seen.add(id)
 
-      // Return corners in [tl, tr, br, bl] order for rotation detection
-      markers.push({
-        id,
-        corners: corners  // already ordered [tl, tr, br, bl]
-      })
+      markers.push({ id, rotation, corners })
     }
 
     return markers
