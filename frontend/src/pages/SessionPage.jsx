@@ -8,36 +8,63 @@ const BAR_COLORS = { A:'#e8ff47', B:'#47c8ff', C:'#ffa500', D:'#ff4757' }
 
 // ── QR Code modal so teacher can open scan page on phone ──
 function ScanQRModal({ sessionId, onClose }) {
-  const scanUrl = `${window.location.origin}/scan/${sessionId}`
+  const [ip, setIp] = useState('')
+  const scanUrl = ip ? `http://${ip}:5173/scan/${sessionId}` : ''
+
+  // Try to detect local IP via WebRTC
+  useEffect(() => {
+    try {
+      const pc = new RTCPeerConnection({ iceServers: [] })
+      pc.createDataChannel('')
+      pc.createOffer().then(o => pc.setLocalDescription(o))
+      pc.onicecandidate = e => {
+        if (!e.candidate) return
+        const match = e.candidate.candidate.match(/(\d+\.\d+\.\d+\.\d+)/)
+        if (match && !match[1].startsWith('127.')) {
+          setIp(match[1])
+          pc.close()
+        }
+      }
+    } catch {}
+  }, [])
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal" style={{ maxWidth: 400, textAlign: 'center' }} onClick={e => e.stopPropagation()}>
         <h2 style={{ marginBottom: '.5rem' }}>Open Scanner on Phone</h2>
         <p style={{ color: 'var(--muted)', fontSize: '.85rem', marginBottom: '1.5rem' }}>
-          Scan this QR code with your phone camera to open the scanner.
+          Make sure your phone is on the same WiFi network as this laptop.
         </p>
 
-        <img
-          src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(scanUrl)}`}
-          alt="Scan QR"
-          style={{
-            width: 200, height: 200, borderRadius: 8,
-            border: '4px solid var(--accent)', marginBottom: '1rem'
-          }}
-        />
-
-        <p style={{ fontSize: '.75rem', color: 'var(--muted)', marginBottom: '.5rem' }}>
-          Or type this URL manually:
-        </p>
-        <code style={{
-          display: 'block', background: 'var(--bg)',
-          border: '1px solid var(--border)', borderRadius: 6,
-          padding: '.6rem', fontSize: '.8rem', color: 'var(--accent)',
-          wordBreak: 'break-all', marginBottom: '1rem'
-        }}>
-          {scanUrl}
-        </code>
+        {scanUrl ? (
+          <>
+            {/* QR code via free API */}
+            <img
+              src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(scanUrl)}`}
+              alt="Scan QR"
+              style={{ width: 200, height: 200, borderRadius: 8, border: '4px solid var(--accent)', marginBottom: '1rem' }}
+            />
+            <p style={{ fontSize: '.75rem', color: 'var(--muted)', marginBottom: '.5rem' }}>Or type this URL manually:</p>
+            <code style={{
+              display: 'block', background: 'var(--bg)', border: '1px solid var(--border)',
+              borderRadius: 6, padding: '.6rem', fontSize: '.8rem',
+              color: 'var(--accent)', wordBreak: 'break-all', marginBottom: '1rem'
+            }}>
+              {scanUrl}
+            </code>
+          </>
+        ) : (
+          <div style={{ padding: '2rem', color: 'var(--muted)' }}>
+            <p style={{ marginBottom: '1rem' }}>Detecting your IP address…</p>
+            <p style={{ fontSize: '.8rem' }}>
+              If it doesn't appear, type this in your phone's browser:<br/>
+              <code style={{ color: 'var(--accent)' }}>http://YOUR-LAPTOP-IP:5173/scan/{sessionId}</code>
+            </p>
+            <p style={{ fontSize: '.75rem', marginTop: '.75rem' }}>
+              Find your IP with: <code style={{ color: 'var(--accent)' }}>ip addr show</code> in terminal
+            </p>
+          </div>
+        )}
 
         <button className="btn btn-ghost" onClick={onClose}>Close</button>
       </div>
@@ -236,14 +263,20 @@ export default function SessionPage() {
                   const count = tally[l]
                   const pct = totalStudents ? Math.round(count / totalStudents * 100) : 0
                   const isCorrect = currentSlide.correct_answer === l
+                  const answerText = currentSlide[`answer_${l.toLowerCase()}`]
                   return (
                     <div key={l} className="answer-bar-row">
                       <span className={`answer-pill pill-${l}`}>{l}</span>
-                      <div className="bar-track">
-                        <div className="bar-fill" style={{
-                          width: `${pct}%`,
-                          background: isCorrect ? BAR_COLORS[l] : `${BAR_COLORS[l]}66`
-                        }}/>
+                      <div style={{flex:1,display:'flex',flexDirection:'column',gap:'2px'}}>
+                        {answerText && (
+                          <span style={{fontSize:'.72rem',color:'var(--text)',lineHeight:1.2}}>{answerText}</span>
+                        )}
+                        <div className="bar-track">
+                          <div className="bar-fill" style={{
+                            width: `${pct}%`,
+                            background: isCorrect ? BAR_COLORS[l] : `${BAR_COLORS[l]}66`
+                          }}/>
+                        </div>
                       </div>
                       <span style={{ fontFamily:'var(--mono)', fontSize:'.75rem', color:'var(--muted)', minWidth:'2.5rem', textAlign:'right' }}>
                         {count} ({pct}%)

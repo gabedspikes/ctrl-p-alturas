@@ -1,10 +1,12 @@
 import React, { useEffect, useState, useRef } from 'react'
 import { supabase } from '../lib/supabase'
 import { useNavigate } from 'react-router-dom'
+import { useAuth } from '../lib/auth'
 import { Users, Plus, Trash2, Printer, ChevronDown, ChevronRight, Upload } from 'lucide-react'
 
 // ── Modal: Create / Edit Course ──────────────────────────
 function CourseModal({ onClose, onSave, initial }) {
+  const { user } = useAuth()
   const [name, setName] = useState(initial?.name || '')
   const [desc, setDesc] = useState(initial?.description || '')
   async function submit(e) {
@@ -12,7 +14,7 @@ function CourseModal({ onClose, onSave, initial }) {
     if (initial?.id) {
       await supabase.from('courses').update({ name, description: desc }).eq('id', initial.id)
     } else {
-      await supabase.from('courses').insert({ name, description: desc })
+      await supabase.from('courses').insert({ name, description: desc, teacher_id: user.id })
     }
     onSave()
   }
