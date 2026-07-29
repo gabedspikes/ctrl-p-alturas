@@ -59,6 +59,8 @@ export default function SlideEditorPage() {
 
   const [answerLayout, setAnswerLayout] = useState('horizontal') // 'horizontal' | 'vertical' | '2x2'
   const [bgColor, setBgColor] = useState('#1a1a20')
+  const [selectedColor, setSelectedColor] = useState('#e8e8ec') // color of selected object
+  const [hasSelection, setHasSelection] = useState(false)
   const canvasRef    = useRef(null)
   const fabricRef    = useRef(null)
   const activeSlideRef = useRef(null)
@@ -103,6 +105,25 @@ export default function SlideEditorPage() {
         canvas.loadFromJSON(activeSlide.canvas_json, () => canvas.renderAll())
       }
 
+      // Track selected object for color picker
+      canvas.on('selection:created', e => {
+        const obj = e.selected?.[0]
+        if (obj) {
+          setHasSelection(true)
+          setSelectedColor(obj.fill || obj.color || '#e8e8ec')
+        }
+      })
+      canvas.on('selection:updated', e => {
+        const obj = e.selected?.[0]
+        if (obj) {
+          setHasSelection(true)
+          setSelectedColor(obj.fill || obj.color || '#e8e8ec')
+        }
+      })
+      canvas.on('selection:cleared', () => {
+        setHasSelection(false)
+      })
+
       setCorrectAnswer(activeSlide.correct_answer || '')
       setQuestionText(activeSlide.question_text || '')
       setAnswerA(activeSlide.answer_a || '')
@@ -110,6 +131,7 @@ export default function SlideEditorPage() {
       setAnswerC(activeSlide.answer_c || '')
       setAnswerD(activeSlide.answer_d || '')
       setBgColor(activeSlide.bg_color || '#1a1a20')
+      setAnswerLayout(activeSlide.answer_layout || 'horizontal')
     })
     return () => { if (fabricRef.current) { fabricRef.current.dispose(); fabricRef.current = null } }
   }, [activeSlide?.id])
@@ -128,6 +150,7 @@ export default function SlideEditorPage() {
       answer_c:       answerCRef.current || null,
       answer_d:       answerDRef.current || null,
       bg_color:       bgColorRef.current || '#1a1a20',
+      answer_layout:  answerLayoutRef.current || 'horizontal',
     }).eq('id', activeSlideRef.current.id)
 
     const { data } = await supabase.from('slides').select('*')
@@ -302,6 +325,24 @@ export default function SlideEditorPage() {
     input.click()
   }
 
+  function applyTextColor(color) {
+    const obj = fabricRef.current?.getActiveObject()
+    if (!obj) return
+    setSelectedColor(color)
+    // Works for IText, Text, and Rect fill
+    if (obj.type === 'i-text' || obj.type === 'text') {
+      // If text has selection, color just that; otherwise color all
+      if (obj.selectionStart !== obj.selectionEnd) {
+        obj.setSelectionStyles({ fill: color })
+      } else {
+        obj.set('fill', color)
+      }
+    } else {
+      obj.set('fill', color)
+    }
+    fabricRef.current.renderAll()
+  }
+
   function deleteSelected() {
     const obj = fabricRef.current?.getActiveObject()
     if (obj) { fabricRef.current.remove(obj); fabricRef.current.renderAll() }
@@ -377,6 +418,37 @@ export default function SlideEditorPage() {
 
         {/* Right: props panel */}
         <div className="props-panel">
+          {/* Text / object color picker — shows when something is selected */}
+          <div className="card" style={{
+            border: hasSelection ? '1px solid var(--accent)' : '1px solid var(--border)',
+            transition: 'border-color .2s'
+          }}>
+            <h3>Object Color</h3>
+            <p style={{ fontSize:'.72rem', color:'var(--muted)', marginBottom:'.65rem' }}>
+              {hasSelection ? 'Click a color to apply to selected object.' : 'Select an object on the canvas to change its color.'}
+            </p>
+            <div style={{ display:'flex', gap:'.4rem', flexWrap:'wrap', marginBottom:'.5rem' }}>
+              {['#e8e8ec','#000000','#e8ff47','#47c8ff','#ffa500','#ff4757','#2ed573',
+                '#ffffff','#ff6b81','#a29bfe','#fd79a8','#fdcb6e','#6c5ce7','#00b894'].map(c => (
+                <button key={c} onClick={() => applyTextColor(c)}
+                  disabled={!hasSelection}
+                  style={{
+                    width:24, height:24, borderRadius:4, cursor: hasSelection ? 'pointer' : 'not-allowed',
+                    background:c, border: selectedColor===c ? '3px solid var(--accent)' : '2px solid var(--border)',
+                    opacity: hasSelection ? 1 : 0.4, flexShrink:0
+                  }}/>
+              ))}
+              <input type="color" value={selectedColor}
+                onChange={e => applyTextColor(e.target.value)}
+                disabled={!hasSelection}
+                style={{ width:24, height:24, padding:0, border:'2px solid var(--border)',
+                  borderRadius:4, cursor: hasSelection ? 'pointer' : 'not-allowed',
+                  opacity: hasSelection ? 1 : 0.4 }}
+                title="Custom color"
+              />
+            </div>
+          </div>
+
           <div className="card">
             <h3>Question Label</h3>
             <p style={{ fontSize:'.72rem', color:'var(--muted)', marginBottom:'.6rem' }}>
@@ -441,7 +513,7 @@ export default function SlideEditorPage() {
               {[
                 ['horizontal', '▬▬▬▬', 'Row'],
                 ['vertical',   '▮▮▮▮', 'Column'],
-                ['2x2',        '▪▪▪▪', 'Grid'],
+                ['2x2',        '▪▪\n▪▪', 'Grid'],
               ].map(([val, icon, label]) => (
                 <button key={val} onClick={() => setAnswerLayout(val)} style={{
                   flex:1, padding:'.4rem .25rem', borderRadius:'var(--radius)',
