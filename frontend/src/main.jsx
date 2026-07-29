@@ -26,6 +26,18 @@ function Protected({ children }) {
 
 function Layout({ children }) {
   const { user, signOut } = useAuth()
+  const [theme, setTheme] = React.useState(
+    () => localStorage.getItem('theme') || 'dark'
+  )
+
+  React.useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme)
+    localStorage.setItem('theme', theme)
+  }, [theme])
+
+  function toggleTheme() {
+    setTheme(t => t === 'dark' ? 'light' : 'dark')
+  }
   return (
     <div className="app">
       <nav className="nav">
@@ -36,6 +48,14 @@ function Layout({ children }) {
           <NavLink to="/cards" className={({isActive}) => isActive ? 'active' : ''}>Cards</NavLink>
         </div>
         <div style={{ marginLeft:'auto', display:'flex', alignItems:'center', gap:'.75rem' }}>
+          <button
+            className="btn btn-ghost btn-sm"
+            onClick={toggleTheme}
+            title="Toggle dark/light mode"
+            style={{ fontSize:'1rem', padding:'.3rem .5rem' }}
+          >
+            {theme === 'dark' ? '☀️' : '🌙'}
+          </button>
           <span style={{ fontSize:'.75rem', color:'var(--muted)', maxWidth:180,
             overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
             {user?.email}

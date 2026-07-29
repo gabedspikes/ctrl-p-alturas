@@ -17,6 +17,14 @@ const FABRIC_IDS = {
   answerBoxD: '__answer_box_D__', answerLabelD: '__answer_label_D__', answerTextD: '__answer_text_D__',
 }
 
+// Helper to determine if a color is dark (for text contrast)
+function isColorDark(hex) {
+  const r = parseInt(hex.slice(1,3),16)
+  const g = parseInt(hex.slice(3,5),16)
+  const b = parseInt(hex.slice(5,7),16)
+  return (r*299 + g*587 + b*114) / 1000 < 128
+}
+
 export default function SlideEditorPage() {
   const { id: presentationId } = useParams()
   const navigate = useNavigate()
@@ -49,6 +57,8 @@ export default function SlideEditorPage() {
   useEffect(() => { answerCRef.current = answerC }, [answerC])
   useEffect(() => { answerDRef.current = answerD }, [answerD])
 
+  const [answerLayout, setAnswerLayout] = useState('horizontal') // 'horizontal' | 'vertical' | '2x2'
+  const [bgColor, setBgColor] = useState('#1a1a20')
   const canvasRef    = useRef(null)
   const fabricRef    = useRef(null)
   const activeSlideRef = useRef(null)
@@ -99,6 +109,7 @@ export default function SlideEditorPage() {
       setAnswerB(activeSlide.answer_b || '')
       setAnswerC(activeSlide.answer_c || '')
       setAnswerD(activeSlide.answer_d || '')
+      setBgColor(activeSlide.bg_color || '#1a1a20')
     })
     return () => { if (fabricRef.current) { fabricRef.current.dispose(); fabricRef.current = null } }
   }, [activeSlide?.id])
@@ -116,6 +127,7 @@ export default function SlideEditorPage() {
       answer_b:       answerBRef.current || null,
       answer_c:       answerCRef.current || null,
       answer_d:       answerDRef.current || null,
+      bg_color:       bgColorRef.current || '#1a1a20',
     }).eq('id', activeSlideRef.current.id)
 
     const { data } = await supabase.from('slides').select('*')
@@ -140,6 +152,12 @@ export default function SlideEditorPage() {
     setSlides(remaining)
     if (activeSlide?.id === slideId) setActiveSlide(remaining[0])
   }
+
+  // ── Sync background color to canvas ─────────────────────
+  useEffect(() => {
+    if (!fabricRef.current) return
+    fabricRef.current.setBackgroundColor(bgColor, () => fabricRef.current.renderAll())
+  }, [bgColor])
 
   // ── Canvas sync helpers ───────────────────────────────────
   function getFabricObj(customId) {
@@ -196,9 +214,18 @@ export default function SlideEditorPage() {
     })
   }
 
+  const answerLayoutRef = useRef('horizontal')
+  const bgColorRef = useRef('#1a1a20')
+  useEffect(() => { answerLayoutRef.current = answerLayout }, [answerLayout])
+  useEffect(() => { bgColorRef.current = bgColor }, [bgColor])
+
   function addAnswerLabels() {
     import('fabric').then(({ fabric }) => {
       const answers = { A: answerARef.current, B: answerBRef.current, C: answerCRef.current, D: answerDRef.current }
+      const layout = answerLayoutRef.current
+      const isDark = isColorDark(bgColorRef.current)
+      const textFill = isDark ? '#e8e8ec' : '#1a1a1a'
+
       // Remove existing answer objects
       Object.values(FABRIC_IDS).forEach(id => {
         if (id.startsWith('__answer_')) {
@@ -207,27 +234,47 @@ export default function SlideEditorPage() {
         }
       })
 
-      const colW = 160, startX = 40, startY = 290, boxH = 80
+      // Layout configs
+      let positions
+      if (layout === 'horizontal') {
+        const colW = 165, startX = 30, startY = 295, boxH = 85
+        positions = ['A','B','C','D'].map((l, i) => ({
+          l, x: startX + i * colW, y: startY, w: colW - 10, h: boxH
+        }))
+      } else if (layout === 'vertical') {
+        const rowH = 70, startX = 30, startY = 60, boxW = CANVAS_W - 60
+        positions = ['A','B','C','D'].map((l, i) => ({
+          l, x: startX, y: startY + i * rowH, w: boxW, h: rowH - 8
+        }))
+      } else { // 2x2
+        const colW = (CANVAS_W - 70) / 2, rowH = (CANVAS_H - 120) / 2
+        positions = ['A','B','C','D'].map((l, i) => ({
+          l,
+          x: 30 + (i % 2) * (colW + 10),
+          y: 80 + Math.floor(i / 2) * (rowH + 10),
+          w: colW, h: rowH
+        }))
+      }
 
-      ;['A','B','C','D'].forEach((l, i) => {
-        const x = startX + i * colW
+      positions.forEach(({ l, x, y, w, h }) => {
         const ansText = answers[l] || l
-
         const box = new fabric.Rect({
-          left: x, top: startY, width: colW - 10, height: boxH,
+          left: x, top: y, width: w, height: h,
           fill: ANS_BG[l], stroke: ANS_COLORS[l], strokeWidth: 1.5, rx: 6, ry: 6,
           customId: FABRIC_IDS[`answerBox${l}`]
         })
         const label = new fabric.Text(l, {
-          left: x + 10, top: startY + 10,
-          fontSize: 22, fill: ANS_COLORS[l],
-          fontFamily: 'DM Mono, monospace', fontWeight: '700',
-          customId: FABRIC_IDS[`answerLabel${l}`], selectable: false, evented: false
+          left: x + 8, top: y + 8,
+          fontSize: layout === 'vertical' ? 18 : 20,
+          fill: ANS_COLORS[l], fontFamily: 'DM Mono, monospace', fontWeight: '700',
+          customId: FABRIC_IDS[`answerLabel${l}`]
         })
         const text = new fabric.IText(ansText, {
-          left: x + 10, top: startY + 38,
-          fontSize: 14, fill: '#e8e8ec',
-          fontFamily: 'Syne, sans-serif', width: colW - 25,
+          left: x + (layout === 'vertical' ? 38 : 8),
+          top: y + (layout === 'vertical' ? 12 : 36),
+          fontSize: layout === 'vertical' ? 16 : 13,
+          fill: textFill, fontFamily: 'Syne, sans-serif',
+          width: layout === 'vertical' ? w - 48 : w - 16,
           customId: FABRIC_IDS[`answerText${l}`]
         })
         fabricRef.current.add(box, label, text)
@@ -365,6 +412,54 @@ export default function SlideEditorPage() {
                 />
               </div>
             ))}
+          </div>
+
+          <div className="card">
+            <h3>Slide Background</h3>
+            <div style={{ display:'flex', gap:'.5rem', flexWrap:'wrap', marginBottom:'.6rem' }}>
+              {['#1a1a20','#ffffff','#f8f9fa','#0f172a','#1e3a5f','#1a2e1a','#2e1a1a'].map(c => (
+                <button key={c} onClick={() => setBgColor(c)} style={{
+                  width:28, height:28, borderRadius:4, cursor:'pointer',
+                  background:c, border: bgColor===c ? '3px solid var(--accent)' : '2px solid var(--border)',
+                  flexShrink:0
+                }}/>
+              ))}
+              <input type="color" value={bgColor} onChange={e => setBgColor(e.target.value)}
+                style={{ width:28, height:28, padding:0, border:'2px solid var(--border)',
+                  borderRadius:4, cursor:'pointer', background:'none' }}
+                title="Custom color"
+              />
+            </div>
+            <p style={{ fontSize:'.72rem', color:'var(--muted)' }}>
+              {isColorDark(bgColor) ? '🌙 Dark background' : '☀️ Light background'} — answer text color adjusts automatically
+            </p>
+          </div>
+
+          <div className="card">
+            <h3>Answer Layout</h3>
+            <div style={{ display:'flex', gap:'.5rem' }}>
+              {[
+                ['horizontal', '▬▬▬▬', 'Row'],
+                ['vertical',   '▮▮▮▮', 'Column'],
+                ['2x2',        '▪▪▪▪', 'Grid'],
+              ].map(([val, icon, label]) => (
+                <button key={val} onClick={() => setAnswerLayout(val)} style={{
+                  flex:1, padding:'.4rem .25rem', borderRadius:'var(--radius)',
+                  border: '2px solid', cursor:'pointer', transition:'all .15s',
+                  borderColor: answerLayout===val ? 'var(--accent)' : 'var(--border)',
+                  background: answerLayout===val ? 'rgba(232,255,71,.1)' : 'transparent',
+                  color: answerLayout===val ? 'var(--accent)' : 'var(--muted)',
+                  fontFamily:'var(--font)', fontSize:'.72rem', fontWeight:700,
+                  display:'flex', flexDirection:'column', alignItems:'center', gap:2
+                }}>
+                  <span style={{ fontFamily:'monospace', fontSize:'1rem', letterSpacing:2 }}>{icon}</span>
+                  {label}
+                </button>
+              ))}
+            </div>
+            <p style={{ fontSize:'.72rem', color:'var(--muted)', marginTop:'.5rem' }}>
+              Layout applies when you click "A B C D" in the toolbar.
+            </p>
           </div>
 
           <div className="card">
