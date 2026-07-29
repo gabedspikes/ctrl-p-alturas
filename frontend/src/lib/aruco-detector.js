@@ -1,12 +1,10 @@
 /**
- * aruco-detector.js
- * Minimal self-contained ArUco marker detector for browser use.
- * Based on js-aruco by jcmellado, adapted to ES module with ARUCO dictionary.
- * No external dependencies — works with Vite bundling.
+ * aruco-detector.js — v2
+ * Reliable browser-based marker detector.
+ * Uses canvas-based sampling after finding candidate quads via edge detection.
  */
 
 // ── Marker dictionary — must match CardGeneratorPage exactly ─
-// Keys are card IDs, values are 5x5 bit patterns (1=black, 0=white)
 const MARKER_DICT = {
   1:  [0,1,0,0,0, 0,1,1,0,1, 0,0,0,1,1, 1,0,1,0,1, 0,0,1,0,0],
   2:  [0,1,1,0,0, 0,1,0,0,1, 0,0,1,0,0, 1,1,0,0,1, 0,0,0,0,1],
@@ -18,283 +16,247 @@ const MARKER_DICT = {
   8:  [1,0,1,0,0, 0,0,1,0,0, 0,1,0,0,0, 0,0,1,0,1, 0,1,0,0,1],
   9:  [0,1,1,1,0, 1,0,0,0,1, 1,0,1,0,1, 1,0,0,0,1, 0,1,1,1,0],
   10: [1,1,0,0,1, 0,0,0,1,1, 0,1,0,0,0, 1,1,0,0,0, 0,0,1,1,0],
-};
-
-// ── Perspective transform helpers ─────────────────────────
-function PerspT(src, dst) {
-  const { h } = getPerspectiveTransform(src, dst);
-  return {
-    transform(x, y) {
-      const d = h[6]*x + h[7]*y + h[8];
-      return { x: (h[0]*x + h[1]*y + h[2]) / d, y: (h[3]*x + h[4]*y + h[5]) / d };
-    }
-  };
 }
 
-function getPerspectiveTransform(src, dst) {
-  const A = [], b = [];
-  for (let i = 0; i < 4; i++) {
-    const s = src[i], d = dst[i];
-    A.push([s.x, s.y, 1, 0, 0, 0, -d.x*s.x, -d.x*s.y]);
-    A.push([0, 0, 0, s.x, s.y, 1, -d.y*s.x, -d.y*s.y]);
-    b.push(d.x, d.y);
-  }
-  const h = solve(A, b);
-  h.push(1);
-  return { h };
-}
-
-function solve(A, b) {
-  const n = b.length;
-  const M = A.map((row, i) => [...row, b[i]]);
-  for (let col = 0; col < n; col++) {
-    let maxRow = col;
-    for (let row = col+1; row < n; row++) if (Math.abs(M[row][col]) > Math.abs(M[maxRow][col])) maxRow = row;
-    [M[col], M[maxRow]] = [M[maxRow], M[col]];
-    const d = M[col][col];
-    if (Math.abs(d) < 1e-10) continue;
-    for (let i = col; i <= n; i++) M[col][i] /= d;
-    for (let row = 0; row < n; row++) {
-      if (row === col) continue;
-      const f = M[row][col];
-      for (let i = col; i <= n; i++) M[row][i] -= f * M[col][i];
-    }
-  }
-  return M.map(row => row[n]);
-}
-
-// ── Image processing ──────────────────────────────────────
-function grayscale(imageData) {
-  const { data, width, height } = imageData;
-  const gray = new Uint8Array(width * height);
+// ── Grayscale ─────────────────────────────────────────────
+function toGray(imageData) {
+  const { data, width, height } = imageData
+  const gray = new Uint8Array(width * height)
   for (let i = 0, j = 0; i < data.length; i += 4, j++) {
-    gray[j] = (data[i]*77 + data[i+1]*150 + data[i+2]*29) >> 8;
+    gray[j] = (data[i] * 77 + data[i+1] * 150 + data[i+2] * 29) >> 8
   }
-  return { data: gray, width, height };
+  return { data: gray, width, height }
 }
 
-function threshold(gray, blockSize = 21, C = 7) {
-  const { data, width, height } = gray;
-  const out = new Uint8Array(width * height);
-  const half = Math.floor(blockSize / 2);
+// ── Fast adaptive threshold (integral image based) ────────
+function adaptiveThreshold(gray, blockSize = 25, C = 10) {
+  const { data, width, height } = gray
+  const out = new Uint8Array(width * height)
+  const half = blockSize >> 1
+
+  // Build integral image
+  const integral = new Float64Array((width+1) * (height+1))
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
-      let sum = 0, count = 0;
-      for (let dy = -half; dy <= half; dy++) {
-        const ny = y + dy;
-        if (ny < 0 || ny >= height) continue;
-        for (let dx = -half; dx <= half; dx++) {
-          const nx = x + dx;
-          if (nx < 0 || nx >= width) continue;
-          sum += data[ny * width + nx];
-          count++;
-        }
-      }
-      const mean = sum / count;
-      out[y * width + x] = data[y * width + x] < mean - C ? 0 : 255;
+      integral[(y+1)*(width+1)+(x+1)] = data[y*width+x]
+        + integral[y*(width+1)+(x+1)]
+        + integral[(y+1)*(width+1)+x]
+        - integral[y*(width+1)+x]
     }
   }
-  return { data: out, width, height };
+
+  for (let y = 0; y < height; y++) {
+    const y0 = Math.max(0, y - half)
+    const y1 = Math.min(height - 1, y + half)
+    for (let x = 0; x < width; x++) {
+      const x0 = Math.max(0, x - half)
+      const x1 = Math.min(width - 1, x + half)
+      const count = (x1 - x0) * (y1 - y0)
+      const sum = integral[(y1+1)*(width+1)+(x1+1)]
+        - integral[y0*(width+1)+(x1+1)]
+        - integral[(y1+1)*(width+1)+x0]
+        + integral[y0*(width+1)+x0]
+      out[y*width+x] = data[y*width+x] * count < sum - C * count ? 0 : 255
+    }
+  }
+  return { data: out, width, height }
 }
 
-function findContours(bin) {
-  const { data, width, height } = bin;
-  const visited = new Uint8Array(width * height);
-  const contours = [];
+// ── Connected components to find black regions ─────────────
+function findBlackRegions(bin) {
+  const { data, width, height } = bin
+  const label = new Int32Array(width * height)
+  const regions = [] // [{pixels, minX, maxX, minY, maxY}]
+  let nextLabel = 1
 
   for (let y = 1; y < height-1; y++) {
     for (let x = 1; x < width-1; x++) {
-      const idx = y * width + x;
-      if (data[idx] !== 0 || visited[idx]) continue;
-      // Check if it's an edge pixel (has white neighbor)
-      let isEdge = false;
-      for (const [dy, dx] of [[-1,0],[1,0],[0,-1],[0,1]]) {
-        if (data[(y+dy)*width+(x+dx)] === 255) { isEdge = true; break; }
-      }
-      if (!isEdge) continue;
+      const idx = y * width + x
+      if (data[idx] !== 0 || label[idx] !== 0) continue
 
-      // Trace contour
-      const contour = [];
-      const stack = [[x, y]];
-      while (stack.length) {
-        const [cx, cy] = stack.pop();
-        const ci = cy * width + cx;
-        if (visited[ci]) continue;
-        visited[ci] = 1;
-        if (data[ci] === 0) {
-          contour.push({ x: cx, y: cy });
-          for (const [dy, dx] of [[-1,0],[1,0],[0,-1],[0,1],[-1,-1],[-1,1],[1,-1],[1,1]]) {
-            const nx = cx+dx, ny = cy+dy;
-            if (nx >= 0 && nx < width && ny >= 0 && ny < height) stack.push([nx, ny]);
+      // BFS
+      const pixels = []
+      let minX = x, maxX = x, minY = y, maxY = y
+      const queue = [idx]
+      label[idx] = nextLabel
+
+      let qi = 0
+      while (qi < queue.length) {
+        const ci = queue[qi++]
+        const cx = ci % width, cy = Math.floor(ci / width)
+        pixels.push({ x: cx, y: cy })
+        if (cx < minX) minX = cx; if (cx > maxX) maxX = cx
+        if (cy < minY) minY = cy; if (cy > maxY) maxY = cy
+
+        for (const [dy, dx] of [[-1,0],[1,0],[0,-1],[0,1]]) {
+          const ni = ci + dy * width + dx
+          if (ni < 0 || ni >= data.length) continue
+          if (data[ni] === 0 && label[ni] === 0) {
+            label[ni] = nextLabel
+            queue.push(ni)
           }
         }
       }
-      if (contour.length > 50) contours.push(contour);
+
+      const w = maxX - minX, h = maxY - minY
+      // Filter: must be roughly square-ish and large enough
+      if (pixels.length > 200 && w > 20 && h > 20) {
+        regions.push({ pixels, minX, maxX, minY, maxY, w, h })
+      }
+      nextLabel++
     }
   }
-  return contours;
+  return regions
 }
 
-function approxPolygon(contour, epsilon) {
-  if (contour.length < 4) return contour;
-  // Ramer-Douglas-Peucker
-  let maxDist = 0, maxIdx = 0;
-  const start = contour[0], end = contour[contour.length-1];
-  for (let i = 1; i < contour.length-1; i++) {
-    const d = pointLineDistance(contour[i], start, end);
-    if (d > maxDist) { maxDist = d; maxIdx = i; }
+// ── Find corners of a region using convex hull extremes ───
+function findCorners(region) {
+  const { pixels, minX, maxX, minY, maxY } = region
+  const cx = (minX + maxX) / 2
+  const cy = (minY + maxY) / 2
+
+  // Find extreme points in each quadrant
+  let tl = null, tr = null, bl = null, br = null
+  let tlD = -1, trD = -1, blD = -1, brD = -1
+
+  for (const p of pixels) {
+    const dx = p.x - cx, dy = p.y - cy
+    const d = dx*dx + dy*dy
+    if (dx <= 0 && dy <= 0 && d > tlD) { tl = p; tlD = d }
+    if (dx >= 0 && dy <= 0 && d > trD) { tr = p; trD = d }
+    if (dx <= 0 && dy >= 0 && d > blD) { bl = p; blD = d }
+    if (dx >= 0 && dy >= 0 && d > brD) { br = p; brD = d }
   }
-  if (maxDist > epsilon) {
-    const left = approxPolygon(contour.slice(0, maxIdx+1), epsilon);
-    const right = approxPolygon(contour.slice(maxIdx), epsilon);
-    return [...left.slice(0,-1), ...right];
-  }
-  return [start, end];
+
+  if (!tl || !tr || !bl || !br) return null
+  return [tl, tr, br, bl]
 }
 
-function pointLineDistance(p, a, b) {
-  const dx = b.x - a.x, dy = b.y - a.y;
-  const len = Math.sqrt(dx*dx + dy*dy);
-  if (len === 0) return Math.sqrt((p.x-a.x)**2 + (p.y-a.y)**2);
-  return Math.abs(dx*(a.y-p.y) - (a.x-p.x)*dy) / len;
+// ── Perspective transform ─────────────────────────────────
+function getPerspMatrix(src) {
+  // src: [tl, tr, br, bl]
+  const [tl, tr, br, bl] = src
+  const W = Math.max(
+    Math.hypot(tr.x-tl.x, tr.y-tl.y),
+    Math.hypot(br.x-bl.x, br.y-bl.y)
+  )
+  const H = Math.max(
+    Math.hypot(bl.x-tl.x, bl.y-tl.y),
+    Math.hypot(br.x-tr.x, br.y-tr.y)
+  )
+  return { W: Math.round(W), H: Math.round(H), src }
 }
 
-function isConvex(pts) {
-  let sign = 0;
-  const n = pts.length;
-  for (let i = 0; i < n; i++) {
-    const a = pts[i], b = pts[(i+1)%n], c = pts[(i+2)%n];
-    const cross = (b.x-a.x)*(c.y-a.y) - (b.y-a.y)*(c.x-a.x);
-    if (cross !== 0) {
-      if (sign === 0) sign = cross > 0 ? 1 : -1;
-      else if ((cross > 0 ? 1 : -1) !== sign) return false;
-    }
-  }
-  return true;
-}
+// Sample the marker using bilinear interpolation
+function sampleMarker(gray, corners, gridSize = 7) {
+  const [tl, tr, br, bl] = corners
+  const bits = []
 
-function orderCorners(pts) {
-  // Sort by angle from centroid
-  const cx = pts.reduce((s,p) => s+p.x, 0) / 4;
-  const cy = pts.reduce((s,p) => s+p.y, 0) / 4;
-  return [...pts].sort((a, b) => Math.atan2(a.y-cy, a.x-cx) - Math.atan2(b.y-cy, b.x-cx));
-}
+  for (let row = 0; row < gridSize; row++) {
+    for (let col = 0; col < gridSize; col++) {
+      // Normalized position (center of cell)
+      const u = (col + 0.5) / gridSize
+      const v = (row + 0.5) / gridSize
 
-// ── Read marker bits from warped image ────────────────────
-function readBits(imageData, corners, N = 7) {
-  const size = 7 * N;
-  const dst = [
-    { x: 0, y: 0 }, { x: size-1, y: 0 },
-    { x: size-1, y: size-1 }, { x: 0, y: size-1 }
-  ];
-  const ordered = orderCorners(corners);
-  const pt = PerspT(ordered, dst);
+      // Bilinear interpolation across the quad
+      const x = tl.x*(1-u)*(1-v) + tr.x*u*(1-v) + br.x*u*v + bl.x*(1-u)*v
+      const y = tl.y*(1-u)*(1-v) + tr.y*u*(1-v) + br.y*u*v + bl.y*(1-u)*v
 
-  const bits = [];
-  for (let row = 0; row < 7; row++) {
-    for (let col = 0; col < 7; col++) {
-      const cx = (col + 0.5) * N;
-      const cy = (row + 0.5) * N;
-      const src = pt.transform(cx, cy);
-      const px = Math.round(src.x), py = Math.round(src.y);
-      if (px < 0 || px >= imageData.width || py < 0 || py >= imageData.height) {
-        bits.push(1);
+      const px = Math.round(x), py = Math.round(y)
+      if (px < 0 || px >= gray.width || py < 0 || py >= gray.height) {
+        bits.push(1)
       } else {
-        bits.push(imageData.data[py * imageData.width + px] < 128 ? 1 : 0);
+        bits.push(gray.data[py * gray.width + px] < 128 ? 1 : 0)
       }
     }
   }
-  return bits;
+  return bits
 }
 
-function rotate5x5(bits, times) {
-  let b = [...bits];
-  for (let t = 0; t < times; t++) {
-    const r = new Array(25);
-    for (let i = 0; i < 5; i++)
-      for (let j = 0; j < 5; j++)
-        r[j*5 + (4-i)] = b[i*5 + j];
-    b = r;
-  }
-  return b;
-}
-
-function hammingDistance(a, b) {
-  let d = 0;
-  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) d++;
-  return d;
-}
-
-function extractId(bits) {
-  // Border must be mostly black
-  let borderBlack = 0;
+// ── Validate border and extract inner bits ────────────────
+function validateAndExtract(bits) {
+  // All 4 border rows/cols must be >= 80% black
+  let borderOk = 0
   for (let i = 0; i < 7; i++) {
-    if (bits[i] === 1) borderBlack++;
-    if (bits[42+i] === 1) borderBlack++;
-    if (bits[i*7] === 1) borderBlack++;
-    if (bits[i*7+6] === 1) borderBlack++;
+    if (bits[i] === 1) borderOk++          // top row
+    if (bits[42+i] === 1) borderOk++       // bottom row
+    if (bits[i*7] === 1) borderOk++        // left col
+    if (bits[i*7+6] === 1) borderOk++      // right col
   }
-  if (borderBlack < 18) return -1;
+  // 24 border cells, need 19+
+  if (borderOk < 19) return null
 
-  // Extract inner 5x5
-  const inner = [];
+  const inner = []
   for (let r = 1; r <= 5; r++)
     for (let c = 1; c <= 5; c++)
-      inner.push(bits[r*7+c]);
-
-  // Try all 4 rotations, find closest match in our dictionary
-  let bestId = -1, bestDist = 4;
-  for (let rot = 0; rot < 4; rot++) {
-    const rotated = rotate5x5(inner, rot);
-    for (const [id, pattern] of Object.entries(MARKER_DICT)) {
-      const dist = hammingDistance(rotated, pattern);
-      if (dist < bestDist) {
-        bestDist = dist;
-        bestId = parseInt(id);
-      }
-    }
-  }
-  return bestId;
+      inner.push(bits[r*7+c])
+  return inner
 }
 
+// ── Rotate 5x5 ────────────────────────────────────────────
+function rotate5x5(bits, times) {
+  let b = [...bits]
+  for (let t = 0; t < times; t++) {
+    const r = new Array(25)
+    for (let i = 0; i < 5; i++)
+      for (let j = 0; j < 5; j++)
+        r[j*5+(4-i)] = b[i*5+j]
+    b = r
+  }
+  return b
+}
 
-// ── Main Detector ─────────────────────────────────────────
+// ── Match against dictionary ──────────────────────────────
+function matchDict(inner) {
+  let bestId = -1, bestDist = 5 // threshold: allow up to 4 bit errors
+  for (let rot = 0; rot < 4; rot++) {
+    const rotated = rotate5x5(inner, rot)
+    for (const [id, pattern] of Object.entries(MARKER_DICT)) {
+      let dist = 0
+      for (let i = 0; i < 25; i++) if (rotated[i] !== pattern[i]) dist++
+      if (dist < bestDist) { bestDist = dist; bestId = parseInt(id) }
+    }
+  }
+  return bestId
+}
+
+// ── Main Detector class ───────────────────────────────────
 export class ArucoDetector {
   detect(imageData) {
-    const gray = grayscale(imageData);
+    const gray = toGray(imageData)
+    const bin = adaptiveThreshold(gray, 25, 8)
+    const regions = findBlackRegions(bin)
+    const markers = []
+    const seen = new Set()
 
-    // Use smaller block for speed on mobile
-    const bin = threshold(gray, 15, 5);
-    const contours = findContours(bin);
-    const markers = [];
+    for (const region of regions) {
+      const { w, h } = region
+      // Aspect ratio check: must be roughly square
+      const ratio = w / h
+      if (ratio < 0.5 || ratio > 2.0) continue
 
-    for (const contour of contours) {
-      const perimeter = contour.length;
-      const epsilon = 0.05 * perimeter;
-      const poly = approxPolygon(contour, epsilon);
+      const corners = findCorners(region)
+      if (!corners) continue
 
-      if (poly.length !== 4) continue;
-      if (!isConvex(poly)) continue;
+      // Sample the 7x7 grid
+      const bits = sampleMarker(gray, corners, 7)
 
-      // Check minimum area
-      const area = Math.abs(
-        (poly[0].x*(poly[1].y-poly[3].y) +
-         poly[1].x*(poly[2].y-poly[0].y) +
-         poly[2].x*(poly[3].y-poly[1].y) +
-         poly[3].x*(poly[0].y-poly[2].y)) / 2
-      );
-      if (area < 400) continue;
+      // Validate border and get inner bits
+      const inner = validateAndExtract(bits)
+      if (!inner) continue
 
-      try {
-        const bits = readBits(bin, poly);
-        const id = extractId(bits);
-        if (id >= 0) {
-          markers.push({ id, corners: orderCorners(poly) });
-        }
-      } catch(e) {
-        // skip bad markers
-      }
+      // Match against dictionary
+      const id = matchDict(inner)
+      if (id < 0 || seen.has(id)) continue
+      seen.add(id)
+
+      // Return corners in [tl, tr, br, bl] order for rotation detection
+      markers.push({
+        id,
+        corners: corners  // already ordered [tl, tr, br, bl]
+      })
     }
-    return markers;
+
+    return markers
   }
 }
