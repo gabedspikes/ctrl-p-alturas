@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react'
 import { supabase } from '../lib/supabase'
+import { useNavigate } from 'react-router-dom'
 import { Users, Plus, Trash2, Printer, ChevronDown, ChevronRight, Upload } from 'lucide-react'
 
 // ── Modal: Create / Edit Course ──────────────────────────
@@ -287,6 +288,7 @@ function printCards(students) {
 
 // ── Course Card component ────────────────────────────────
 function CourseCard({ course, onEdit, onDelete }) {
+  const navigate = useNavigate()
   const [open, setOpen] = useState(false)
   const [students, setStudents] = useState([])
   const [showAdd, setShowAdd] = useState(false)
@@ -332,7 +334,7 @@ function CourseCard({ course, onEdit, onDelete }) {
             </span>
             <div style={{ display:'flex', gap:'.5rem' }}>
               {students.length > 0 && (
-                <button className="btn btn-ghost btn-sm" onClick={() => printCards(students)}>
+                <button className="btn btn-ghost btn-sm" onClick={() => navigate(`/cards?course=${course.id}`)}>
                   <Printer size={12}/> Print Cards
                 </button>
               )}
