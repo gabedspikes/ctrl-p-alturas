@@ -1,7 +1,7 @@
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 :root {
   --bg: #0d0d0f; --surface: #141417; --border: #2a2a30;
-  --accent: #e8ff47; --accent2: #47c8ff; --danger: #ff4757;
+  --accent: #4772ff; --accent2: #47c8ff; --danger: #ff4757;
   --success: #2ed573; --text: #e8e8ec; --muted: #6b6b78;
   --font: 'Syne', sans-serif; --mono: 'DM Mono', monospace; --radius: 6px;
 }
@@ -22,7 +22,7 @@ h3 { font-size: 1rem; font-weight: 600; }
 .card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 1rem; margin-top: 1.5rem; }
 button, .btn { font-family: var(--font); font-weight: 600; font-size: .8rem; letter-spacing: .06em; cursor: pointer; border: none; border-radius: var(--radius); padding: .5rem 1rem; transition: all .15s; display: inline-flex; align-items: center; gap: .4rem; }
 .btn-primary { background: var(--accent); color: #0d0d0f; }
-.btn-primary:hover { background: #d4eb2e; }
+.btn-primary:hover { background: #2e5aeb; }
 .btn-ghost { background: transparent; color: var(--muted); border: 1px solid var(--border); }
 .btn-ghost:hover { color: var(--text); border-color: var(--muted); }
 .btn-danger { background: transparent; color: var(--danger); border: 1px solid var(--danger); }
@@ -55,7 +55,7 @@ label { display: block; font-size: .75rem; color: var(--muted); letter-spacing: 
 .answer-pill { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 50%; font-weight: 800; font-size: .8rem; font-family: var(--mono); }
 .pill-A { background: rgba(232,255,71,.2); color: var(--accent); }
 .pill-B { background: rgba(71,200,255,.2); color: var(--accent2); }
-.pill-C { background: rgba(255,165,0,.2); color: #ffa500; }
+.pill-C { background: rgba(255,165,0,.2); color: #006aff; }
 .pill-D { background: rgba(255,71,87,.2); color: var(--danger); }
 .editor-layout { display: grid; grid-template-columns: 220px 1fr 260px; gap: 1rem; height: calc(100vh - 57px); padding: 1rem; background: var(--bg); }
 .slide-list { overflow-y: auto; display: flex; flex-direction: column; gap: .5rem; }
