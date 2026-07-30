@@ -1,5 +1,5 @@
 {
-  "name": "plickers-proto-frontend",
+  "name": "control alturas",
   "version": "0.1.0",
   "private": true,
   "scripts": {
@@ -9,7 +9,6 @@
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.39.0",
-    "fabric": "^5.3.0",
     "js-aruco2": "*",
     "lucide-react": "^0.383.0",
     "react": "^18.2.0",

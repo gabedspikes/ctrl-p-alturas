@@ -2,6 +2,7 @@ import React, { useEffect, useState, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { ChevronLeft, ChevronRight, CheckCircle, XCircle, Smartphone } from 'lucide-react'
+import SlideRenderer from '../components/SlideRenderer'
 
 const ANS_COLORS = { A:'#e8ff47', B:'#47c8ff', C:'#ffa500', D:'#ff4757' }
 const BAR_COLORS = { A:'#e8ff47', B:'#47c8ff', C:'#ffa500', D:'#ff4757' }
@@ -82,8 +83,6 @@ export default function SessionPage() {
   const [responses, setResponses] = useState([])
   const [currentIdx, setCurrentIdx] = useState(0)
   const [showQR, setShowQR]       = useState(false)
-  const fabricRef = useRef(null)
-  const canvasRef = useRef(null)
 
   useEffect(() => {
     async function load() {
@@ -127,26 +126,6 @@ export default function SessionPage() {
     return () => supabase.removeChannel(channel)
   }, [sessionId])
 
-  // Render slide canvas
-  useEffect(() => {
-    const slide = slides[currentIdx]
-    if (!slide || !canvasRef.current) return
-    import('fabric').then(({ fabric }) => {
-      if (fabricRef.current) { fabricRef.current.dispose(); fabricRef.current = null }
-      const canvas = new fabric.Canvas(canvasRef.current, {
-        width: 720, height: 405, backgroundColor: '#1a1a20',
-        selection: false, interactive: false
-      })
-      fabricRef.current = canvas
-      if (slide.canvas_json) {
-        canvas.loadFromJSON(slide.canvas_json, () => {
-          canvas.getObjects().forEach(o => { o.selectable = false; o.evented = false })
-          canvas.renderAll()
-        })
-      }
-    })
-    return () => { if (fabricRef.current) { fabricRef.current.dispose(); fabricRef.current = null } }
-  }, [currentIdx, slides])
 
   async function goTo(idx) {
     if (idx < 0 || idx >= slides.length) return
@@ -218,7 +197,7 @@ export default function SessionPage() {
         {/* Left: slide + controls */}
         <div style={{ display:'flex', flexDirection:'column', gap:'1rem' }}>
           <div style={{ border:'1px solid var(--border)', borderRadius:'var(--radius)', overflow:'hidden' }}>
-            <canvas ref={canvasRef} />
+            <SlideRenderer slide={slides[currentIdx]} width={720} height={405} showCorrect={false}/>
           </div>
 
           <div style={{ display:'flex', alignItems:'center', gap:'1rem', justifyContent:'center' }}>

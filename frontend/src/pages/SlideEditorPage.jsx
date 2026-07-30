@@ -1,28 +1,37 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
-import { ArrowLeft, Plus, Trash2, Type, ImageIcon, Square, Save } from 'lucide-react'
+import SlideRenderer from '../components/SlideRenderer'
+import { ArrowLeft, Plus, Trash2, ImageIcon, Save, X } from 'lucide-react'
 
-const CANVAS_W = 720
-const CANVAS_H = 405
-const ANS_COLORS = { A:'#e8ff47', B:'#47c8ff', C:'#ffa500', D:'#ff4757' }
-const ANS_BG     = { A:'rgba(232,255,71,0.15)', B:'rgba(71,200,255,0.15)', C:'rgba(255,165,0,0.15)', D:'rgba(255,71,87,0.15)' }
+const ANS_COLORS = { A:'#22c55e', B:'#3b82f6', C:'#f97316', D:'#ef4444' }
 
-// IDs for the auto-managed canvas objects so we can find and update them
-const FABRIC_IDS = {
-  questionText: '__question_text__',
-  answerBoxA: '__answer_box_A__', answerLabelA: '__answer_label_A__', answerTextA: '__answer_text_A__',
-  answerBoxB: '__answer_box_B__', answerLabelB: '__answer_label_B__', answerTextB: '__answer_text_B__',
-  answerBoxC: '__answer_box_C__', answerLabelC: '__answer_label_C__', answerTextC: '__answer_text_C__',
-  answerBoxD: '__answer_box_D__', answerLabelD: '__answer_label_D__', answerTextD: '__answer_text_D__',
+const BG_PRESETS = [
+  { color: '#1a1a20', label: 'Dark'        },
+  { color: '#ffffff', label: 'White'       },
+  { color: '#f8f9fa', label: 'Light grey'  },
+  { color: '#0f172a', label: 'Navy'        },
+  { color: '#1e3a5f', label: 'Blue'        },
+  { color: '#14532d', label: 'Green'       },
+  { color: '#450a0a', label: 'Dark red'    },
+]
+
+function isColorDark(hex = '#1a1a20') {
+  try {
+    const r = parseInt(hex.slice(1,3),16)
+    const g = parseInt(hex.slice(3,5),16)
+    const b = parseInt(hex.slice(5,7),16)
+    return (r*299 + g*587 + b*114) / 1000 < 128
+  } catch { return true }
 }
 
-// Helper to determine if a color is dark (for text contrast)
-function isColorDark(hex) {
-  const r = parseInt(hex.slice(1,3),16)
-  const g = parseInt(hex.slice(3,5),16)
-  const b = parseInt(hex.slice(5,7),16)
-  return (r*299 + g*587 + b*114) / 1000 < 128
+// ── Empty slide template ──────────────────────────────────
+const EMPTY_SLIDE_FIELDS = {
+  question_text: '',
+  answer_a: '', answer_b: '', answer_c: '', answer_d: '',
+  correct_answer: null,
+  bg_color: '#1a1a20',
+  image_url: null,
 }
 
 export default function SlideEditorPage() {
@@ -31,42 +40,20 @@ export default function SlideEditorPage() {
 
   const [presentation, setPresentation] = useState(null)
   const [slides, setSlides] = useState([])
-  const [activeSlide, setActiveSlide] = useState(null)
+  const [activeIdx, setActiveIdx] = useState(0)
+  const [draft, setDraft] = useState(EMPTY_SLIDE_FIELDS) // local editable copy
   const [saving, setSaving] = useState(false)
+  const [uploading, setUploading] = useState(false)
+  const [dirty, setDirty] = useState(false) // unsaved changes flag
 
-  // Props panel state — use refs as well so saveSlide always sees current values
-  const [correctAnswer, setCorrectAnswer] = useState('')
-  const [questionText, setQuestionText] = useState('')
-  const [answerA, setAnswerA] = useState('')
-  const [answerB, setAnswerB] = useState('')
-  const [answerC, setAnswerC] = useState('')
-  const [answerD, setAnswerD] = useState('')
+  const draftRef  = useRef(draft)
+  const activeIdxRef = useRef(0)
+  useEffect(() => { draftRef.current = draft }, [draft])
+  useEffect(() => { activeIdxRef.current = activeIdx }, [activeIdx])
 
-  const correctAnswerRef = useRef('')
-  const questionTextRef  = useRef('')
-  const answerARef = useRef('')
-  const answerBRef = useRef('')
-  const answerCRef = useRef('')
-  const answerDRef = useRef('')
+  const activeSlide = slides[activeIdx]
 
-  // Keep refs in sync
-  useEffect(() => { correctAnswerRef.current = correctAnswer }, [correctAnswer])
-  useEffect(() => { questionTextRef.current  = questionText  }, [questionText])
-  useEffect(() => { answerARef.current = answerA }, [answerA])
-  useEffect(() => { answerBRef.current = answerB }, [answerB])
-  useEffect(() => { answerCRef.current = answerC }, [answerC])
-  useEffect(() => { answerDRef.current = answerD }, [answerD])
-
-  const [answerLayout, setAnswerLayout] = useState('horizontal') // 'horizontal' | 'vertical' | '2x2'
-  const [bgColor, setBgColor] = useState('#1a1a20')
-  const [selectedColor, setSelectedColor] = useState('#e8e8ec') // color of selected object
-  const [hasSelection, setHasSelection] = useState(false)
-  const canvasRef    = useRef(null)
-  const fabricRef    = useRef(null)
-  const activeSlideRef = useRef(null)
-  useEffect(() => { activeSlideRef.current = activeSlide }, [activeSlide])
-
-  // ── Load presentation + slides ───────────────────────────
+  // ── Load ─────────────────────────────────────────────────
   useEffect(() => {
     async function init() {
       const { data: pres } = await supabase
@@ -78,494 +65,389 @@ export default function SlideEditorPage() {
         .eq('presentation_id', presentationId).order('slide_order')
 
       if (sl && sl.length > 0) {
-        setSlides(sl); setActiveSlide(sl[0])
+        setSlides(sl)
+        loadDraft(sl[0])
+        setActiveIdx(0)
       } else {
         const { data: newSlide } = await supabase.from('slides').insert({
-          presentation_id: presentationId, slide_order: 0,
-          question_text: '', correct_answer: null, canvas_json: null
+          presentation_id: presentationId,
+          slide_order: 0,
+          ...EMPTY_SLIDE_FIELDS,
         }).select().single()
-        setSlides([newSlide]); setActiveSlide(newSlide)
+        setSlides([newSlide])
+        loadDraft(newSlide)
+        setActiveIdx(0)
       }
     }
     init()
   }, [presentationId])
 
-  // ── Init Fabric when active slide changes ────────────────
-  useEffect(() => {
-    if (!activeSlide || !canvasRef.current) return
-    import('fabric').then(({ fabric }) => {
-      if (fabricRef.current) { fabricRef.current.dispose(); fabricRef.current = null }
-      const canvas = new fabric.Canvas(canvasRef.current, {
-        width: CANVAS_W, height: CANVAS_H,
-        backgroundColor: '#1a1a20', selection: true
-      })
-      fabricRef.current = canvas
-
-      if (activeSlide.canvas_json) {
-        canvas.loadFromJSON(activeSlide.canvas_json, () => canvas.renderAll())
-      }
-
-      // Track selected object for color picker
-      canvas.on('selection:created', e => {
-        const obj = e.selected?.[0]
-        if (obj) {
-          setHasSelection(true)
-          setSelectedColor(obj.fill || obj.color || '#e8e8ec')
-        }
-      })
-      canvas.on('selection:updated', e => {
-        const obj = e.selected?.[0]
-        if (obj) {
-          setHasSelection(true)
-          setSelectedColor(obj.fill || obj.color || '#e8e8ec')
-        }
-      })
-      canvas.on('selection:cleared', () => {
-        setHasSelection(false)
-      })
-
-      setCorrectAnswer(activeSlide.correct_answer || '')
-      setQuestionText(activeSlide.question_text || '')
-      setAnswerA(activeSlide.answer_a || '')
-      setAnswerB(activeSlide.answer_b || '')
-      setAnswerC(activeSlide.answer_c || '')
-      setAnswerD(activeSlide.answer_d || '')
-      setBgColor(activeSlide.bg_color || '#1a1a20')
-      setAnswerLayout(activeSlide.answer_layout || 'horizontal')
+  function loadDraft(slide) {
+    setDraft({
+      question_text:  slide.question_text  || '',
+      answer_a:       slide.answer_a       || '',
+      answer_b:       slide.answer_b       || '',
+      answer_c:       slide.answer_c       || '',
+      answer_d:       slide.answer_d       || '',
+      correct_answer: slide.correct_answer || null,
+      bg_color:       slide.bg_color       || '#1a1a20',
+      image_url:      slide.image_url      || null,
     })
-    return () => { if (fabricRef.current) { fabricRef.current.dispose(); fabricRef.current = null } }
-  }, [activeSlide?.id])
+    setDirty(false)
+  }
 
-  // ── Save slide ────────────────────────────────────────────
+  function updateDraft(field, value) {
+    setDraft(d => ({ ...d, [field]: value }))
+    setDirty(true)
+  }
+
+  // ── Save ─────────────────────────────────────────────────
   const saveSlide = useCallback(async () => {
-    if (!fabricRef.current || !activeSlideRef.current) return
+    const slide = slides[activeIdxRef.current]
+    if (!slide) return
     setSaving(true)
-    const json = fabricRef.current.toJSON(['customId'])
+    const d = draftRef.current
     await supabase.from('slides').update({
-      canvas_json:    json,
-      question_text:  questionTextRef.current,
-      correct_answer: correctAnswerRef.current || null,
-      answer_a:       answerARef.current || null,
-      answer_b:       answerBRef.current || null,
-      answer_c:       answerCRef.current || null,
-      answer_d:       answerDRef.current || null,
-      bg_color:       bgColorRef.current || '#1a1a20',
-      answer_layout:  answerLayoutRef.current || 'horizontal',
-    }).eq('id', activeSlideRef.current.id)
+      question_text:  d.question_text  || null,
+      answer_a:       d.answer_a       || null,
+      answer_b:       d.answer_b       || null,
+      answer_c:       d.answer_c       || null,
+      answer_d:       d.answer_d       || null,
+      correct_answer: d.correct_answer || null,
+      bg_color:       d.bg_color       || '#1a1a20',
+      image_url:      d.image_url      || null,
+    }).eq('id', slide.id)
 
+    // refresh list
     const { data } = await supabase.from('slides').select('*')
       .eq('presentation_id', presentationId).order('slide_order')
     setSlides(data || [])
     setSaving(false)
-  }, [presentationId])
+    setDirty(false)
+  }, [slides, presentationId])
 
-  async function switchSlide(slide) { await saveSlide(); setActiveSlide(slide) }
+  // ── Switch slide ─────────────────────────────────────────
+  async function switchSlide(idx) {
+    if (dirty) await saveSlide()
+    setActiveIdx(idx)
+    loadDraft(slides[idx])
+  }
+
+  // ── Add / Delete slides ──────────────────────────────────
   async function addSlide() {
-    await saveSlide()
+    if (dirty) await saveSlide()
     const { data: newSlide } = await supabase.from('slides').insert({
-      presentation_id: presentationId, slide_order: slides.length,
-      question_text: '', correct_answer: null, canvas_json: null
+      presentation_id: presentationId,
+      slide_order: slides.length,
+      ...EMPTY_SLIDE_FIELDS,
     }).select().single()
-    setSlides(s => [...s, newSlide]); setActiveSlide(newSlide)
+    const newSlides = [...slides, newSlide]
+    setSlides(newSlides)
+    setActiveIdx(newSlides.length - 1)
+    loadDraft(newSlide)
   }
-  async function deleteSlide(slideId) {
+
+  async function deleteSlide(idx) {
     if (slides.length === 1) return alert("Can't delete the last slide.")
-    await supabase.from('slides').delete().eq('id', slideId)
-    const remaining = slides.filter(s => s.id !== slideId)
+    if (!confirm('Delete this slide?')) return
+    await supabase.from('slides').delete().eq('id', slides[idx].id)
+    const remaining = slides.filter((_, i) => i !== idx)
     setSlides(remaining)
-    if (activeSlide?.id === slideId) setActiveSlide(remaining[0])
+    const newIdx = Math.min(idx, remaining.length - 1)
+    setActiveIdx(newIdx)
+    loadDraft(remaining[newIdx])
   }
 
-  // ── Sync background color to canvas ─────────────────────
-  useEffect(() => {
-    if (!fabricRef.current) return
-    fabricRef.current.setBackgroundColor(bgColor, () => fabricRef.current.renderAll())
-  }, [bgColor])
+  // ── Image upload ─────────────────────────────────────────
+  async function handleImageUpload(e) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setUploading(true)
+    const path = `slides/${presentationId}/${Date.now()}_${file.name.replace(/\s/g,'_')}`
 
-  // ── Canvas sync helpers ───────────────────────────────────
-  function getFabricObj(customId) {
-    return fabricRef.current?.getObjects().find(o => o.customId === customId)
-  }
-
-  // Sync question text to canvas
-  useEffect(() => {
-    if (!fabricRef.current) return
-    import('fabric').then(({ fabric }) => {
-      const existing = getFabricObj(FABRIC_IDS.questionText)
-      if (existing) {
-        existing.set('text', questionText || 'Question text here')
-        fabricRef.current.renderAll()
-      }
-    })
-  }, [questionText])
-
-  // Sync answer texts to canvas
-  function syncAnswerText(letter, text, setter) {
-    if (!fabricRef.current) return
-    const textId = FABRIC_IDS[`answerText${letter}`]
-    const existing = getFabricObj(textId)
-    if (existing) {
-      existing.set('text', text || letter)
-      fabricRef.current.renderAll()
+    const { error } = await supabase.storage.from('slide-images').upload(path, file)
+    if (error) {
+      // fallback: use local object URL (won't persist after reload but works for demo)
+      const url = URL.createObjectURL(file)
+      updateDraft('image_url', url)
+      setUploading(false)
+      return
     }
-    setter(text)
+    const { data } = supabase.storage.from('slide-images').getPublicUrl(path)
+    updateDraft('image_url', data.publicUrl)
+    setUploading(false)
   }
 
-  // ── Canvas tools ─────────────────────────────────────────
-  function addText() {
-    import('fabric').then(({ fabric }) => {
-      const t = new fabric.IText(questionText || 'Question text here', {
-        left: 40, top: 40, fontSize: 28, fill: '#e8e8ec',
-        fontFamily: 'Syne, sans-serif', fontWeight: '700',
-        customId: FABRIC_IDS.questionText
-      })
-      // Remove existing question text object if any
-      const old = getFabricObj(FABRIC_IDS.questionText)
-      if (old) fabricRef.current.remove(old)
-      fabricRef.current.add(t)
-      fabricRef.current.setActiveObject(t)
-    })
+  function removeImage() {
+    updateDraft('image_url', null)
   }
 
-  function addRect() {
-    import('fabric').then(({ fabric }) => {
-      const r = new fabric.Rect({
-        left: 100, top: 100, width: 200, height: 80,
-        fill: 'rgba(232,255,71,0.15)', stroke: '#e8ff47', strokeWidth: 1, rx: 6, ry: 6
-      })
-      fabricRef.current.add(r)
-    })
-  }
+  if (!presentation) return (
+    <div style={{ minHeight:'100vh', background:'var(--bg)', display:'flex',
+      alignItems:'center', justifyContent:'center', color:'var(--muted)' }}>
+      Loading…
+    </div>
+  )
 
-  const answerLayoutRef = useRef('horizontal')
-  const bgColorRef = useRef('#1a1a20')
-  useEffect(() => { answerLayoutRef.current = answerLayout }, [answerLayout])
-  useEffect(() => { bgColorRef.current = bgColor }, [bgColor])
-
-  function addAnswerLabels() {
-    import('fabric').then(({ fabric }) => {
-      const answers = { A: answerARef.current, B: answerBRef.current, C: answerCRef.current, D: answerDRef.current }
-      const layout = answerLayoutRef.current
-      const isDark = isColorDark(bgColorRef.current)
-      const textFill = isDark ? '#e8e8ec' : '#1a1a1a'
-
-      // Remove existing answer objects
-      Object.values(FABRIC_IDS).forEach(id => {
-        if (id.startsWith('__answer_')) {
-          const obj = getFabricObj(id)
-          if (obj) fabricRef.current.remove(obj)
-        }
-      })
-
-      // Layout configs
-      let positions
-      if (layout === 'horizontal') {
-        const colW = 165, startX = 30, startY = 295, boxH = 85
-        positions = ['A','B','C','D'].map((l, i) => ({
-          l, x: startX + i * colW, y: startY, w: colW - 10, h: boxH
-        }))
-      } else if (layout === 'vertical') {
-        const rowH = 70, startX = 30, startY = 60, boxW = CANVAS_W - 60
-        positions = ['A','B','C','D'].map((l, i) => ({
-          l, x: startX, y: startY + i * rowH, w: boxW, h: rowH - 8
-        }))
-      } else { // 2x2
-        const colW = (CANVAS_W - 70) / 2, rowH = (CANVAS_H - 120) / 2
-        positions = ['A','B','C','D'].map((l, i) => ({
-          l,
-          x: 30 + (i % 2) * (colW + 10),
-          y: 80 + Math.floor(i / 2) * (rowH + 10),
-          w: colW, h: rowH
-        }))
-      }
-
-      positions.forEach(({ l, x, y, w, h }) => {
-        const ansText = answers[l] || l
-        const box = new fabric.Rect({
-          left: x, top: y, width: w, height: h,
-          fill: ANS_BG[l], stroke: ANS_COLORS[l], strokeWidth: 1.5, rx: 6, ry: 6,
-          customId: FABRIC_IDS[`answerBox${l}`]
-        })
-        const label = new fabric.Text(l, {
-          left: x + 8, top: y + 8,
-          fontSize: layout === 'vertical' ? 18 : 20,
-          fill: ANS_COLORS[l], fontFamily: 'DM Mono, monospace', fontWeight: '700',
-          customId: FABRIC_IDS[`answerLabel${l}`]
-        })
-        const text = new fabric.IText(ansText, {
-          left: x + (layout === 'vertical' ? 38 : 8),
-          top: y + (layout === 'vertical' ? 12 : 36),
-          fontSize: layout === 'vertical' ? 16 : 13,
-          fill: textFill, fontFamily: 'Syne, sans-serif',
-          width: layout === 'vertical' ? w - 48 : w - 16,
-          customId: FABRIC_IDS[`answerText${l}`]
-        })
-        fabricRef.current.add(box, label, text)
-      })
-      fabricRef.current.renderAll()
-    })
-  }
-
-  function addImage() {
-    const input = document.createElement('input')
-    input.type = 'file'; input.accept = 'image/*'
-    input.onchange = (e) => {
-      const file = e.target.files[0]; if (!file) return
-      const reader = new FileReader()
-      reader.onload = (ev) => {
-        import('fabric').then(({ fabric }) => {
-          fabric.Image.fromURL(ev.target.result, img => {
-            img.scaleToWidth(300); img.set({ left: 200, top: 60 })
-            fabricRef.current.add(img)
-          })
-        })
-      }
-      reader.readAsDataURL(file)
-    }
-    input.click()
-  }
-
-  function applyTextColor(color) {
-    const obj = fabricRef.current?.getActiveObject()
-    if (!obj) return
-    setSelectedColor(color)
-    // Works for IText, Text, and Rect fill
-    if (obj.type === 'i-text' || obj.type === 'text') {
-      // If text has selection, color just that; otherwise color all
-      if (obj.selectionStart !== obj.selectionEnd) {
-        obj.setSelectionStyles({ fill: color })
-      } else {
-        obj.set('fill', color)
-      }
-    } else {
-      obj.set('fill', color)
-    }
-    fabricRef.current.renderAll()
-  }
-
-  function deleteSelected() {
-    const obj = fabricRef.current?.getActiveObject()
-    if (obj) { fabricRef.current.remove(obj); fabricRef.current.renderAll() }
-  }
-
-  if (!presentation) return <div style={{ padding:'2rem', color:'var(--muted)' }}>Loading…</div>
+  // Build a merged slide for the live preview
+  const previewSlide = activeSlide ? { ...activeSlide, ...draft } : null
 
   return (
-    <div style={{ background:'var(--bg)', minHeight:'100vh' }}>
-      {/* Top bar */}
+    <div style={{ background:'var(--bg)', minHeight:'100vh', display:'flex', flexDirection:'column' }}>
+
+      {/* ── Top bar ─────────────────────────────────────── */}
       <div style={{
         display:'flex', alignItems:'center', gap:'1rem', padding:'.75rem 1.25rem',
         background:'var(--surface)', borderBottom:'1px solid var(--border)',
-        position:'sticky', top:0, zIndex:50
+        position:'sticky', top:0, zIndex:50, flexShrink:0,
       }}>
         <button className="btn btn-ghost btn-sm" onClick={() => navigate('/presentations')}>
           <ArrowLeft size={14}/> Back
         </button>
-        <span style={{ fontWeight:700, fontSize:'1rem' }}>{presentation.title}</span>
-        <span className="badge badge-blue">{presentation.courses?.name}</span>
-        <div style={{ marginLeft:'auto' }}>
+        <div>
+          <span style={{ fontWeight:700, fontSize:'1rem' }}>{presentation.title}</span>
+          <span className="badge badge-blue" style={{ marginLeft:'.5rem' }}>
+            {presentation.courses?.name}
+          </span>
+        </div>
+        <div style={{ marginLeft:'auto', display:'flex', gap:'.5rem', alignItems:'center' }}>
+          {dirty && (
+            <span style={{ fontSize:'.75rem', color:'var(--muted)', fontStyle:'italic' }}>
+              Unsaved changes
+            </span>
+          )}
           <button className="btn btn-primary btn-sm" onClick={saveSlide} disabled={saving}>
-            <Save size={13}/> {saving ? 'Saving…' : 'Save Slide'}
+            <Save size={13}/> {saving ? 'Saving…' : 'Save'}
           </button>
         </div>
       </div>
 
-      <div className="editor-layout">
-        {/* Left: slide list */}
-        <div className="slide-list">
-          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'.5rem' }}>
-            <span style={{ fontSize:'.7rem', color:'var(--muted)', fontWeight:700, letterSpacing:'.1em' }}>SLIDES</span>
-            <button className="btn btn-ghost btn-sm" onClick={addSlide}><Plus size={12}/></button>
-          </div>
-          {slides.map((s, i) => (
-            <div key={s.id}
-              className={`slide-thumb ${activeSlide?.id === s.id ? 'active' : ''}`}
-              onClick={() => switchSlide(s)}>
-              <span style={{ fontFamily:'var(--mono)', fontSize:'.75rem' }}>{i+1}</span>
-              <span style={{ flex:1, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', fontSize:'.75rem' }}>
-                {s.question_text || '—'}
-              </span>
-              {s.correct_answer && (
-                <span style={{ fontSize:'.65rem', fontWeight:800, color: ANS_COLORS[s.correct_answer] }}>
-                  {s.correct_answer}
-                </span>
-              )}
-              {slides.length > 1 && (
-                <button className="btn btn-ghost btn-sm" style={{ padding:'.1rem', minWidth:0 }}
-                  onClick={e => { e.stopPropagation(); deleteSlide(s.id) }}>
-                  <Trash2 size={10}/>
-                </button>
-              )}
-            </div>
-          ))}
-        </div>
+      {/* ── Main layout ─────────────────────────────────── */}
+      <div style={{
+        flex: 1, display:'grid',
+        gridTemplateColumns: '200px 1fr 300px',
+        gap: 0, overflow:'hidden',
+        height: 'calc(100vh - 57px)',
+      }}>
 
-        {/* Center: canvas */}
-        <div className="canvas-area">
-          <div className="slide-tools">
-            <button className="btn btn-ghost btn-sm" onClick={addText}><Type size={13}/> Question</button>
-            <button className="btn btn-ghost btn-sm" onClick={addRect}><Square size={13}/> Shape</button>
-            <button className="btn btn-ghost btn-sm" onClick={addAnswerLabels}>A B C D</button>
-            <button className="btn btn-ghost btn-sm" onClick={addImage}><ImageIcon size={13}/> Image</button>
-            <button className="btn btn-danger btn-sm" onClick={deleteSelected}><Trash2 size={13}/> Delete</button>
-          </div>
-          <div className="canvas-wrap"><canvas ref={canvasRef}/></div>
-          <p style={{ fontSize:'.7rem', color:'var(--muted)' }}>
-            Click to select · Double-click text to edit · Drag to move ·
-            <strong style={{ color:'var(--accent)' }}> Sidebar text syncs to canvas automatically</strong>
-          </p>
-        </div>
-
-        {/* Right: props panel */}
-        <div className="props-panel">
-          {/* Text / object color picker — shows when something is selected */}
-          <div className="card" style={{
-            border: hasSelection ? '1px solid var(--accent)' : '1px solid var(--border)',
-            transition: 'border-color .2s'
+        {/* ── Left: slide list ─────────────────────────── */}
+        <div style={{
+          background:'var(--surface)', borderRight:'1px solid var(--border)',
+          display:'flex', flexDirection:'column', overflow:'hidden',
+        }}>
+          <div style={{
+            padding:'.75rem', borderBottom:'1px solid var(--border)',
+            display:'flex', alignItems:'center', justifyContent:'space-between',
           }}>
-            <h3>Object Color</h3>
-            <p style={{ fontSize:'.72rem', color:'var(--muted)', marginBottom:'.65rem' }}>
-              {hasSelection ? 'Click a color to apply to selected object.' : 'Select an object on the canvas to change its color.'}
-            </p>
-            <div style={{ display:'flex', gap:'.4rem', flexWrap:'wrap', marginBottom:'.5rem' }}>
-              {['#e8e8ec','#000000','#e8ff47','#47c8ff','#ffa500','#ff4757','#2ed573',
-                '#ffffff','#ff6b81','#a29bfe','#fd79a8','#fdcb6e','#6c5ce7','#00b894'].map(c => (
-                <button key={c} onClick={() => applyTextColor(c)}
-                  disabled={!hasSelection}
-                  style={{
-                    width:24, height:24, borderRadius:4, cursor: hasSelection ? 'pointer' : 'not-allowed',
-                    background:c, border: selectedColor===c ? '3px solid var(--accent)' : '2px solid var(--border)',
-                    opacity: hasSelection ? 1 : 0.4, flexShrink:0
-                  }}/>
-              ))}
-              <input type="color" value={selectedColor}
-                onChange={e => applyTextColor(e.target.value)}
-                disabled={!hasSelection}
-                style={{ width:24, height:24, padding:0, border:'2px solid var(--border)',
-                  borderRadius:4, cursor: hasSelection ? 'pointer' : 'not-allowed',
-                  opacity: hasSelection ? 1 : 0.4 }}
-                title="Custom color"
-              />
-            </div>
+            <span style={{ fontSize:'.7rem', color:'var(--muted)', fontWeight:700, letterSpacing:'.1em' }}>
+              SLIDES ({slides.length})
+            </span>
+            <button className="btn btn-ghost btn-sm" onClick={addSlide} title="Add slide">
+              <Plus size={12}/>
+            </button>
           </div>
 
-          <div className="card">
-            <h3>Question Label</h3>
-            <p style={{ fontSize:'.72rem', color:'var(--muted)', marginBottom:'.6rem' }}>
-              Type here to update the question on the canvas.
-            </p>
-            <textarea
-              rows={3}
-              value={questionText}
-              onChange={e => setQuestionText(e.target.value)}
-              placeholder="e.g. Is the sky blue?"
-            />
-          </div>
-
-          <div className="card">
-            <h3>Answer Text</h3>
-            <p style={{ fontSize:'.72rem', color:'var(--muted)', marginBottom:'.75rem' }}>
-              Updates canvas answer boxes automatically when "A B C D" is placed.
-            </p>
-            {[
-              ['A', answerA, v => syncAnswerText('A', v, setAnswerA)],
-              ['B', answerB, v => syncAnswerText('B', v, setAnswerB)],
-              ['C', answerC, v => syncAnswerText('C', v, setAnswerC)],
-              ['D', answerD, v => syncAnswerText('D', v, setAnswerD)],
-            ].map(([l, val, handler]) => (
-              <div key={l} style={{ display:'flex', alignItems:'center', gap:'.5rem', marginBottom:'.4rem' }}>
-                <span style={{ fontWeight:800, fontFamily:'var(--mono)', fontSize:'.9rem',
-                  color:ANS_COLORS[l], minWidth:16 }}>{l}</span>
-                <input
-                  value={val}
-                  onChange={e => handler(e.target.value)}
-                  placeholder={`Answer ${l}…`}
-                  style={{ fontSize:'.8rem', padding:'.35rem .6rem' }}
-                />
+          <div style={{ flex:1, overflowY:'auto', padding:'.5rem', display:'flex', flexDirection:'column', gap:'.4rem' }}>
+            {slides.map((s, i) => (
+              <div key={s.id}
+                onClick={() => switchSlide(i)}
+                style={{
+                  cursor:'pointer', borderRadius:6, overflow:'hidden',
+                  border: activeIdx === i ? '2px solid var(--accent)' : '2px solid var(--border)',
+                  transition:'border-color .15s', position:'relative',
+                }}>
+                {/* Thumbnail */}
+                <div style={{ pointerEvents:'none', transform:'scale(0.236)', transformOrigin:'top left',
+                  width: 720, height: 405, marginBottom: -340 }}>
+                  <SlideRenderer slide={s} width={720} height={405} showCorrect={false} compact={false}/>
+                </div>
+                {/* Slide number */}
+                <div style={{
+                  position:'absolute', bottom:4, left:6,
+                  fontSize:'.65rem', color: activeIdx===i ? 'var(--accent)' : 'var(--muted)',
+                  fontFamily:'var(--mono)', fontWeight:700,
+                }}>
+                  {i+1}
+                </div>
+                {/* Delete button */}
+                {slides.length > 1 && (
+                  <button
+                    onClick={e => { e.stopPropagation(); deleteSlide(i) }}
+                    style={{
+                      position:'absolute', top:3, right:3,
+                      background:'rgba(0,0,0,.5)', border:'none', borderRadius:3,
+                      color:'#fff', cursor:'pointer', padding:'1px 4px', fontSize:10,
+                      opacity: activeIdx===i ? 1 : 0, transition:'opacity .15s',
+                    }}
+                    className="slide-delete-btn"
+                  >
+                    ×
+                  </button>
+                )}
               </div>
             ))}
           </div>
+        </div>
 
-          <div className="card">
-            <h3>Slide Background</h3>
-            <div style={{ display:'flex', gap:'.5rem', flexWrap:'wrap', marginBottom:'.6rem' }}>
-              {['#1a1a20','#ffffff','#f8f9fa','#0f172a','#1e3a5f','#1a2e1a','#2e1a1a'].map(c => (
-                <button key={c} onClick={() => setBgColor(c)} style={{
-                  width:28, height:28, borderRadius:4, cursor:'pointer',
-                  background:c, border: bgColor===c ? '3px solid var(--accent)' : '2px solid var(--border)',
-                  flexShrink:0
-                }}/>
+        {/* ── Center: live preview ─────────────────────── */}
+        <div style={{
+          display:'flex', flexDirection:'column', alignItems:'center',
+          justifyContent:'center', gap:'1rem', padding:'1.5rem',
+          background: 'var(--bg)', overflow:'auto',
+        }}>
+          <div style={{
+            boxShadow:'0 8px 40px rgba(0,0,0,.4)',
+            borderRadius:8, overflow:'hidden', width:'100%', maxWidth:720,
+          }}>
+            <SlideRenderer slide={previewSlide} width={720} height={405} showCorrect={true}/>
+          </div>
+          <p style={{ fontSize:'.75rem', color:'var(--muted)', textAlign:'center' }}>
+            Live preview — updates as you type in the sidebar
+          </p>
+        </div>
+
+        {/* ── Right: edit panel ────────────────────────── */}
+        <div style={{
+          background:'var(--surface)', borderLeft:'1px solid var(--border)',
+          overflowY:'auto', display:'flex', flexDirection:'column', gap:0,
+        }}>
+
+          {/* Question */}
+          <div style={{ padding:'1rem', borderBottom:'1px solid var(--border)' }}>
+            <label style={{ display:'block', fontSize:'.7rem', color:'var(--muted)',
+              fontWeight:700, letterSpacing:'.1em', marginBottom:'.5rem' }}>
+              QUESTION
+            </label>
+            <textarea
+              rows={4}
+              value={draft.question_text}
+              onChange={e => updateDraft('question_text', e.target.value)}
+              placeholder="Type your question here…"
+              style={{ resize:'vertical', fontSize:'.875rem', lineHeight:1.5 }}
+            />
+          </div>
+
+          {/* Answers */}
+          <div style={{ padding:'1rem', borderBottom:'1px solid var(--border)' }}>
+            <label style={{ display:'block', fontSize:'.7rem', color:'var(--muted)',
+              fontWeight:700, letterSpacing:'.1em', marginBottom:'.75rem' }}>
+              ANSWERS — click the letter to set correct answer
+            </label>
+            {['A','B','C','D'].map(l => {
+              const field = `answer_${l.toLowerCase()}`
+              const isCorrect = draft.correct_answer === l
+              return (
+                <div key={l} style={{ display:'flex', alignItems:'center', gap:'.5rem', marginBottom:'.5rem' }}>
+                  {/* Letter button = set correct answer */}
+                  <button
+                    onClick={() => updateDraft('correct_answer', isCorrect ? null : l)}
+                    title={isCorrect ? 'Click to unset correct answer' : 'Click to set as correct answer'}
+                    style={{
+                      width:32, height:32, borderRadius:6, flexShrink:0,
+                      border: `2px solid ${ANS_COLORS[l]}`,
+                      background: isCorrect ? ANS_COLORS[l] : 'transparent',
+                      color: isCorrect ? '#fff' : ANS_COLORS[l],
+                      fontWeight:800, fontSize:'.85rem', fontFamily:'var(--mono)',
+                      cursor:'pointer', transition:'all .15s',
+                      display:'flex', alignItems:'center', justifyContent:'center',
+                    }}>
+                    {isCorrect ? '✓' : l}
+                  </button>
+                  <input
+                    value={draft[field]}
+                    onChange={e => updateDraft(field, e.target.value)}
+                    placeholder={`Answer ${l}…`}
+                    style={{
+                      fontSize:'.85rem',
+                      borderColor: isCorrect ? ANS_COLORS[l] : undefined,
+                      boxShadow: isCorrect ? `0 0 0 2px ${ANS_COLORS[l]}33` : undefined,
+                    }}
+                  />
+                </div>
+              )
+            })}
+          </div>
+
+          {/* Image */}
+          <div style={{ padding:'1rem', borderBottom:'1px solid var(--border)' }}>
+            <label style={{ display:'block', fontSize:'.7rem', color:'var(--muted)',
+              fontWeight:700, letterSpacing:'.1em', marginBottom:'.75rem' }}>
+              IMAGE (optional)
+            </label>
+            {draft.image_url ? (
+              <div style={{ position:'relative' }}>
+                <img src={draft.image_url} alt="Slide"
+                  style={{ width:'100%', borderRadius:6, border:'1px solid var(--border)', display:'block' }}/>
+                <button onClick={removeImage} style={{
+                  position:'absolute', top:6, right:6,
+                  background:'rgba(0,0,0,.7)', border:'none', borderRadius:4,
+                  color:'#fff', cursor:'pointer', padding:'3px 6px', fontSize:12,
+                  display:'flex', alignItems:'center', gap:3,
+                }}>
+                  <X size={11}/> Remove
+                </button>
+              </div>
+            ) : (
+              <label style={{
+                display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center',
+                gap:'.4rem', padding:'1.25rem', border:'2px dashed var(--border)',
+                borderRadius:8, cursor:'pointer', color:'var(--muted)', fontSize:'.8rem',
+                transition:'border-color .15s',
+              }}
+                onMouseEnter={e => e.currentTarget.style.borderColor='var(--accent)'}
+                onMouseLeave={e => e.currentTarget.style.borderColor='var(--border)'}
+              >
+                <ImageIcon size={22} style={{ opacity:.5 }}/>
+                {uploading ? 'Uploading…' : 'Click to upload image'}
+                <input type="file" accept="image/*" style={{ display:'none' }}
+                  onChange={handleImageUpload} disabled={uploading}/>
+              </label>
+            )}
+          </div>
+
+          {/* Background color */}
+          <div style={{ padding:'1rem' }}>
+            <label style={{ display:'block', fontSize:'.7rem', color:'var(--muted)',
+              fontWeight:700, letterSpacing:'.1em', marginBottom:'.75rem' }}>
+              BACKGROUND
+            </label>
+            <div style={{ display:'flex', gap:'.4rem', flexWrap:'wrap' }}>
+              {BG_PRESETS.map(({ color, label }) => (
+                <button
+                  key={color}
+                  onClick={() => updateDraft('bg_color', color)}
+                  title={label}
+                  style={{
+                    width:28, height:28, borderRadius:5, cursor:'pointer',
+                    background:color, flexShrink:0,
+                    border: draft.bg_color === color
+                      ? '3px solid var(--accent)'
+                      : '2px solid var(--border)',
+                    transition:'border .1s',
+                  }}
+                />
               ))}
-              <input type="color" value={bgColor} onChange={e => setBgColor(e.target.value)}
+              <input
+                type="color"
+                value={draft.bg_color}
+                onChange={e => updateDraft('bg_color', e.target.value)}
                 style={{ width:28, height:28, padding:0, border:'2px solid var(--border)',
-                  borderRadius:4, cursor:'pointer', background:'none' }}
+                  borderRadius:5, cursor:'pointer', background:'none' }}
                 title="Custom color"
               />
             </div>
-            <p style={{ fontSize:'.72rem', color:'var(--muted)' }}>
-              {isColorDark(bgColor) ? '🌙 Dark background' : '☀️ Light background'} — answer text color adjusts automatically
+            <p style={{ fontSize:'.7rem', color:'var(--muted)', marginTop:'.5rem' }}>
+              {isColorDark(draft.bg_color) ? '🌙 Dark background' : '☀️ Light background'}
             </p>
-          </div>
-
-          <div className="card">
-            <h3>Answer Layout</h3>
-            <div style={{ display:'flex', gap:'.5rem' }}>
-              {[
-                ['horizontal', '▬▬▬▬', 'Row'],
-                ['vertical',   '▮▮▮▮', 'Column'],
-                ['2x2',        '▪▪\n▪▪', 'Grid'],
-              ].map(([val, icon, label]) => (
-                <button key={val} onClick={() => setAnswerLayout(val)} style={{
-                  flex:1, padding:'.4rem .25rem', borderRadius:'var(--radius)',
-                  border: '2px solid', cursor:'pointer', transition:'all .15s',
-                  borderColor: answerLayout===val ? 'var(--accent)' : 'var(--border)',
-                  background: answerLayout===val ? 'rgba(232,255,71,.1)' : 'transparent',
-                  color: answerLayout===val ? 'var(--accent)' : 'var(--muted)',
-                  fontFamily:'var(--font)', fontSize:'.72rem', fontWeight:700,
-                  display:'flex', flexDirection:'column', alignItems:'center', gap:2
-                }}>
-                  <span style={{ fontFamily:'monospace', fontSize:'1rem', letterSpacing:2 }}>{icon}</span>
-                  {label}
-                </button>
-              ))}
-            </div>
-            <p style={{ fontSize:'.72rem', color:'var(--muted)', marginTop:'.5rem' }}>
-              Layout applies when you click "A B C D" in the toolbar.
-            </p>
-          </div>
-
-          <div className="card">
-            <h3>Correct Answer</h3>
-            <div style={{ display:'flex', gap:'.5rem' }}>
-              {['A','B','C','D'].map(l => (
-                <button key={l}
-                  onClick={() => setCorrectAnswer(correctAnswer === l ? '' : l)}
-                  style={{
-                    flex:1, height:40, fontWeight:800, fontFamily:'var(--mono)',
-                    fontSize:'1rem', borderRadius:'var(--radius)', border:'2px solid',
-                    borderColor: correctAnswer === l ? ANS_COLORS[l] : 'var(--border)',
-                    background:  correctAnswer === l ? `${ANS_COLORS[l]}22` : 'transparent',
-                    color:       correctAnswer === l ? ANS_COLORS[l] : 'var(--muted)',
-                    cursor:'pointer', transition:'all .15s'
-                  }}>
-                  {l}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="card">
-            <h3>Tips</h3>
-            <ul style={{ fontSize:'.75rem', color:'var(--muted)', paddingLeft:'1rem', lineHeight:1.8 }}>
-              <li>Click "Question" to add the question box</li>
-              <li>Click "A B C D" to add answer boxes</li>
-              <li>Type in the sidebar — canvas updates live</li>
-              <li>Set the correct answer above</li>
-              <li>Save before switching slides</li>
-            </ul>
           </div>
         </div>
       </div>
+
+      {/* Hover show delete on slide thumbs */}
+      <style>{`
+        .slide-delete-btn { opacity: 0 !important; }
+        div:hover > .slide-delete-btn { opacity: 1 !important; }
+      `}</style>
     </div>
   )
 }

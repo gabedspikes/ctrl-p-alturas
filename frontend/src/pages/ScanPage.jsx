@@ -2,6 +2,7 @@ import { ArucoDetector } from '../lib/aruco-detector.js'
 import React, { useEffect, useRef, useState, useCallback } from 'react'
 import { useParams, useSearchParams, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
+import SlideRenderer from '../components/SlideRenderer'
 
 // ── Answer from ArUco corner rotation ───────────────────
 // corners are sorted clockwise by angle from centroid: [tl, tr, br, bl]
@@ -66,8 +67,8 @@ function cornersToAnswer(corners, rotation) {
 }
 
 // ── Answer colors ────────────────────────────────────────
-const ANS_COLORS = { A: '#e8ff47', B: '#47c8ff', C: '#ffa500', D: '#ff4757' }
-const ANS_HEX    = { A: '#e8ff47', B: '#47c8ff', C: '#ffa500', D: '#ff4757' }
+const ANS_COLORS = { A: '#2E9DF2', B: '#47c8ff', C: '#ffa500', D: '#ff4757' }
+const ANS_HEX    = { A: '#2E9DF2', B: '#47c8ff', C: '#ffa500', D: '#ff4757' }
 
 export default function ScanPage() {
   const { sessionId } = useParams()
@@ -341,7 +342,7 @@ export default function ScanPage() {
 
   if (status !== 'ready' && status !== 'init') return (
     <div style={styles.loadingScreen}>
-      <div style={{ color: '#e8ff47', fontSize: '1.5rem' }}>◈</div>
+      <div style={{ color: '#2E9DF2', fontSize: '1.5rem' }}>◈</div>
       <p style={{ color: '#888', marginTop: '.5rem' }}>Loading session…</p>
     </div>
   )
@@ -356,16 +357,21 @@ export default function ScanPage() {
           <span style={styles.className}>{sessionInfo?.courses?.name}</span>
         </div>
         <div style={styles.counter}>
-          <span style={{ color: '#e8ff47', fontWeight: 800, fontSize: '1.2rem' }}>{scannedCount}</span>
+          <span style={{ color: '#2E9DF2', fontWeight: 800, fontSize: '1.2rem' }}>{scannedCount}</span>
           <span style={{ color: '#555', fontSize: '.75rem' }}>/ {totalStudents}</span>
         </div>
       </div>
 
-      {/* Slide question */}
-      {slideInfo?.question_text && (
-        <div style={styles.questionBar}>
-          <span style={{ fontSize: '.75rem', color: '#555', marginRight: '.5rem' }}>Q:</span>
-          {slideInfo.question_text}
+      {/* Slide preview — compact */}
+      {slideInfo && (
+        <div style={{ flexShrink:0 }}>
+          <SlideRenderer
+            slide={slideInfo}
+            width={480}
+            height={120}
+            showCorrect={false}
+            compact={true}
+          />
         </div>
       )}
 
@@ -378,7 +384,7 @@ export default function ScanPage() {
         {!camReady && (
           <div style={styles.camPrompt}>
             <div style={{ fontSize: '3rem', marginBottom: '.5rem' }}>📷</div>
-            <p style={{ color: '#e8ff47', fontWeight: 700 }}>
+            <p style={{ color: '#2E9DF2', fontWeight: 700 }}>
               {status === 'loading' ? 'Loading…' : 'Starting camera…'}
             </p>
             <p style={{ color: '#666', fontSize: '.8rem', marginTop: '.35rem' }}>
@@ -439,7 +445,7 @@ const styles = {
     padding: '.75rem 1rem', background: '#141417',
     borderBottom: '1px solid #2a2a30', position: 'sticky', top: 0, zIndex: 10,
   },
-  logo: { color: '#e8ff47', fontWeight: 800, fontSize: '.9rem', letterSpacing: '.1em' },
+  logo: { color: '#2E9DF2', fontWeight: 800, fontSize: '.9rem', letterSpacing: '.1em' },
   headerInfo: { flex: 1, display: 'flex', flexDirection: 'column' },
   sessionName: { fontSize: '.8rem', fontWeight: 700 },
   className: { fontSize: '.7rem', color: '#555' },
@@ -482,7 +488,7 @@ const styles = {
   cardBadge: {
     fontSize: '.65rem', fontWeight: 700, padding: '.15rem .4rem',
     borderRadius: 99, background: 'rgba(232,255,71,.12)',
-    color: '#e8ff47', fontFamily: 'monospace',
+    color: '#2E9DF2', fontFamily: 'monospace',
   },
   studentName: { flex: 1, fontSize: '.8rem' },
   errorScreen: {
