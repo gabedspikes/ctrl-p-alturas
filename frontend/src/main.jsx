@@ -10,6 +10,7 @@ import SessionPage from './pages/SessionPage'
 import ScanPage from './pages/ScanPage'
 import CardGeneratorPage from './pages/CardGeneratorPage'
 import './styles.css'
+import InstallPrompt from './components/InstallPrompt'
 
 // ── Protected route ───────────────────────────────────────
 function Protected({ children }) {
@@ -59,6 +60,7 @@ function Layout({ children }) {
         </div>
       </nav>
       <main className="main">{children}</main>
+      <InstallPrompt />
     </div>
   )
 }
