@@ -118,13 +118,31 @@ export default function CardGeneratorPage() {
       })
   }, [])
 
-  // Load students when course selected
+  // Load students from current year generation when course selected
   useEffect(() => {
     if (!selectedCourse) { setStudents([]); return }
     setLoading(true)
-    supabase.from('students').select('*')
-      .eq('course_id', selectedCourse).order('card_id')
-      .then(({ data }) => { setStudents(data || []); setLoading(false) })
+    const year = new Date().getFullYear()
+    supabase.from('generations').select('id')
+      .eq('course_id', selectedCourse).eq('year', year).single()
+      .then(({ data: gen }) => {
+        if (!gen) { setStudents([]); setLoading(false); return }
+        supabase.from('generation_students')
+          .select('card_id, students(id, name, rut)')
+          .eq('generation_id', gen.id)
+          .eq('active', true)
+          .order('card_id')
+          .then(({ data }) => {
+            const flat = (data || []).map(gs => ({
+              id: gs.students.id,
+              name: gs.students.name,
+              rut: gs.students.rut,
+              card_id: gs.card_id,
+            }))
+            setStudents(flat)
+            setLoading(false)
+          })
+      })
   }, [selectedCourse])
 
   // Which card IDs to show: if class selected, show only assigned cards;

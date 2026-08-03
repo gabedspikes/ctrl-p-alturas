@@ -102,18 +102,34 @@ export default function ScanPage() {
 
       const { data: sess, error: sessErr } = await supabase
         .from('sessions')
-        .select('*, courses(id, name), presentations(title)')
+        .select('*, courses(id, name), presentations(title), generations(id, year)')
         .eq('id', sessionId).single()
 
       if (sessErr || !sess) { setError('Session not found.'); setStatus('error'); return }
       setSessionInfo(sess)
       setCurrentSlideId(sess.current_slide_id)
 
-      // load students keyed by card_id
-      const { data: studs } = await supabase
-        .from('students').select('*').eq('course_id', sess.course_id)
+      // Load students from generation if available, else fall back
+      let studs = []
+      if (sess.generation_id) {
+        const { data: genStu } = await supabase
+          .from('generation_students')
+          .select('card_id, students(id, name, rut)')
+          .eq('generation_id', sess.generation_id)
+          .eq('active', true)
+        studs = (genStu || []).map(gs => ({
+          id: gs.students.id,
+          name: gs.students.name,
+          rut: gs.students.rut,
+          card_id: gs.card_id,
+        }))
+      } else if (sess.course_id) {
+        const { data: fallback } = await supabase
+          .from('students').select('*').eq('course_id', sess.course_id)
+        studs = fallback || []
+      }
       const map = {}
-      studs?.forEach(s => { map[s.card_id] = s })
+      studs.forEach(s => { map[s.card_id] = s })
       setStudents(map)
 
       // load slide info for correct answer

@@ -4,43 +4,27 @@ import { useAuth } from '../lib/auth'
 import { supabase } from '../lib/supabase'
 import { FileSliders, Plus, Pencil, Trash2, Play, AlertCircle } from 'lucide-react'
 
+const CURRENT_YEAR = new Date().getFullYear()
+
 // ── Modal: Create / Edit Presentation ───────────────────
 function PresentationModal({ onClose, onSave, initial }) {
   const { user } = useAuth()
-  const [title, setTitle]         = useState(initial?.title || '')
-  const [subjectId, setSubjectId] = useState(initial?.subject_id || '')
-  const [courseId, setCourseId]   = useState(initial?.course_id || '')
-  const [courses, setCourses]     = useState([])
-  const [subjects, setSubjects]   = useState([]) // teacher's assigned subjects
-  const [loading, setLoading]     = useState(true)
+  const [title, setTitle]           = useState(initial?.title || '')
+  const [teacherCourseId, setTeacherCourseId] = useState(initial?.teacher_course_id || '')
+  const [assignments, setAssignments] = useState([]) // teacher_courses rows
+  const [loading, setLoading]       = useState(true)
 
   useEffect(() => {
     async function load() {
-      // Load courses and teacher's assigned subjects in parallel
-      const [{ data: courseData }, { data: subjectData }] = await Promise.all([
-        supabase.from('courses').select('id, name').order('name'),
-        supabase
-          .from('teacher_subjects')
-          .select('subject_id, subjects(id, name, level_id, course_levels(name))')
-          .eq('teacher_id', user.id)
-          .eq('subjects.active', true)
-          .order('subject_id')
-      ])
+      const { data } = await supabase
+        .from('teacher_courses')
+        .select('id, course_id, subject_id, courses(name, grade_level, section), subjects(name)')
+        .eq('teacher_id', user.id)
+        .eq('year', CURRENT_YEAR)
+        .order('course_id')
 
-      setCourses(courseData || [])
-
-      // Flatten the joined subject data
-      const flat = (subjectData || [])
-        .map(row => row.subjects)
-        .filter(Boolean)
-        .sort((a, b) => a.name.localeCompare(b.name, 'es'))
-
-      setSubjects(flat)
-
-      // Set defaults
-      if (!courseId && courseData?.[0]) setCourseId(courseData[0].id)
-      if (!subjectId && flat[0]) setSubjectId(flat[0].id)
-
+      setAssignments(data || [])
+      if (!teacherCourseId && data?.[0]) setTeacherCourseId(data[0].id)
       setLoading(false)
     }
     load()
@@ -48,24 +32,21 @@ function PresentationModal({ onClose, onSave, initial }) {
 
   async function submit(e) {
     e.preventDefault()
-    const selectedSubject = subjects.find(s => s.id === subjectId)
-    const subjectName = selectedSubject?.name || null
+    const assignment = assignments.find(a => a.id === teacherCourseId)
+
+    const payload = {
+      title,
+      teacher_course_id: teacherCourseId || null,
+      course_id:  assignment?.course_id  || null,
+      subject_id: assignment?.subject_id || null,
+      subject:    assignment?.subjects?.name || null,
+      teacher_id: user.id,
+    }
 
     if (initial?.id) {
-      await supabase.from('presentations').update({
-        title,
-        subject_id:   subjectId   || null,
-        subject:      subjectName,  // keep text copy for display
-        course_id:    courseId,
-      }).eq('id', initial.id)
+      await supabase.from('presentations').update(payload).eq('id', initial.id)
     } else {
-      await supabase.from('presentations').insert({
-        title,
-        subject_id:   subjectId   || null,
-        subject:      subjectName,
-        course_id:    courseId,
-        teacher_id:   user.id,
-      })
+      await supabase.from('presentations').insert(payload)
     }
     onSave()
   }
@@ -76,64 +57,54 @@ function PresentationModal({ onClose, onSave, initial }) {
         <h2>{initial ? 'Edit Test' : 'New Test'}</h2>
 
         {loading ? (
-          <p style={{ color:'var(--muted)', fontSize:'.875rem', padding:'1rem 0' }}>Loading…</p>
+          <p style={{ color:'var(--muted)', padding:'1rem 0' }}>Loading your assignments…</p>
         ) : (
           <form onSubmit={submit}>
-
             <div className="form-group">
               <label>TEST TITLE</label>
               <input
                 value={title}
                 onChange={e => setTitle(e.target.value)}
                 required
-                placeholder="e.g. Prueba Capítulo 5"
+                placeholder="e.g. Prueba Unidad 2"
               />
             </div>
 
             <div className="form-group">
-              <label>SUBJECT</label>
-              {subjects.length === 0 ? (
+              <label>CLASS & SUBJECT</label>
+              {assignments.length === 0 ? (
                 <div style={{
                   display:'flex', alignItems:'flex-start', gap:'.5rem',
                   background:'rgba(255,71,87,.08)', border:'1px solid rgba(255,71,87,.25)',
                   borderRadius:'var(--radius)', padding:'.75rem', fontSize:'.82rem',
-                  color:'var(--danger)', lineHeight: 1.5,
+                  color:'var(--danger)', lineHeight:1.5,
                 }}>
                   <AlertCircle size={16} style={{ flexShrink:0, marginTop:2 }}/>
                   <span>
-                    No subjects assigned to your account yet. Ask your administrator
-                    to add your subjects in the Supabase dashboard
-                    (teacher_subjects table).
+                    No assignments found for {CURRENT_YEAR}. Ask your administrator to add
+                    your courses and subjects in the teacher_courses table.
                   </span>
                 </div>
               ) : (
-                <select
-                  value={subjectId}
-                  onChange={e => setSubjectId(e.target.value)}
-                  required
-                >
-                  <option value="">— Select a subject —</option>
-                  {subjects.map(s => (
-                    <option key={s.id} value={s.id}>
-                      {s.name}
-                      {s.course_levels?.name ? ` (${s.course_levels.name})` : ''}
-                    </option>
-                  ))}
-                </select>
+                <>
+                  <select
+                    value={teacherCourseId}
+                    onChange={e => setTeacherCourseId(e.target.value)}
+                    required
+                  >
+                    <option value="">— Select class and subject —</option>
+                    {assignments.map(a => (
+                      <option key={a.id} value={a.id}>
+                        {a.courses?.name} — {a.subjects?.name}
+                      </option>
+                    ))}
+                  </select>
+                  <p style={{ fontSize:'.72rem', color:'var(--muted)', marginTop:'.35rem' }}>
+                    Each option shows the class and subject together.
+                    Contact your admin to add missing combinations.
+                  </p>
+                </>
               )}
-            </div>
-
-            <div className="form-group">
-              <label>CLASS</label>
-              <select
-                value={courseId}
-                onChange={e => setCourseId(e.target.value)}
-                required
-              >
-                {courses.map(c => (
-                  <option key={c.id} value={c.id}>{c.name}</option>
-                ))}
-              </select>
             </div>
 
             <div className="modal-footer">
@@ -141,7 +112,7 @@ function PresentationModal({ onClose, onSave, initial }) {
               <button
                 type="submit"
                 className="btn btn-primary"
-                disabled={subjects.length === 0}
+                disabled={assignments.length === 0}
               >
                 Save
               </button>
@@ -156,16 +127,32 @@ function PresentationModal({ onClose, onSave, initial }) {
 // ── Modal: Start Session ─────────────────────────────────
 function StartSessionModal({ presentation, onClose }) {
   const navigate = useNavigate()
+  const [loading, setLoading] = useState(false)
 
   async function start() {
+    setLoading(true)
+
+    // Get first slide
     const { data: slides } = await supabase
       .from('slides').select('id')
       .eq('presentation_id', presentation.id)
       .order('slide_order').limit(1)
 
+    // Find the generation for this course + current year
+    let generationId = null
+    if (presentation.course_id) {
+      const { data: gen } = await supabase
+        .from('generations').select('id')
+        .eq('course_id', presentation.course_id)
+        .eq('year', CURRENT_YEAR)
+        .single()
+      generationId = gen?.id || null
+    }
+
     const { data: session } = await supabase.from('sessions').insert({
       presentation_id:  presentation.id,
       course_id:        presentation.course_id,
+      generation_id:    generationId,
       current_slide_id: slides?.[0]?.id || null,
       status:           'active',
     }).select().single()
@@ -181,10 +168,16 @@ function StartSessionModal({ presentation, onClose }) {
           Launch <strong style={{ color:'var(--text)' }}>{presentation.title}</strong> as a live session.
           Students will use their printed cards to answer.
         </p>
+        {presentation.subject && (
+          <div style={{ display:'flex', gap:'.4rem', marginBottom:'1.25rem' }}>
+            <span className="badge badge-blue">{presentation.course_name || 'Class'}</span>
+            <span className="badge badge-accent">{presentation.subject}</span>
+          </div>
+        )}
         <div className="modal-footer">
           <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
-          <button className="btn btn-primary" onClick={start}>
-            <Play size={13}/> Start
+          <button className="btn btn-primary" onClick={start} disabled={loading}>
+            <Play size={13}/> {loading ? 'Starting…' : 'Start'}
           </button>
         </div>
       </div>

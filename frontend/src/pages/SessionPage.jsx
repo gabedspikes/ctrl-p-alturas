@@ -51,7 +51,7 @@ export default function SessionPage() {
   useEffect(() => {
     async function load() {
       const { data: sess } = await supabase
-        .from('sessions').select('*, presentations(title, subject), courses(id,name)')
+        .from('sessions').select('*, presentations(title, subject), courses(id,name), generations(id, year)')
         .eq('id', sessionId).single()
       setSession(sess)
 
@@ -60,10 +60,28 @@ export default function SessionPage() {
         .eq('presentation_id', sess.presentation_id).order('slide_order')
       setSlides(sl || [])
 
-      const { data: stu } = await supabase
-        .from('students').select('*')
-        .eq('course_id', sess.course_id).order('card_id')
-      setStudents(stu || [])
+      // Load students from generation if available, else fall back to course students
+      let students = []
+      if (sess.generation_id) {
+        const { data: genStu } = await supabase
+          .from('generation_students')
+          .select('card_id, students(id, name, rut)')
+          .eq('generation_id', sess.generation_id)
+          .eq('active', true)
+          .order('card_id')
+        students = (genStu || []).map(gs => ({
+          id: gs.students.id,
+          name: gs.students.name,
+          rut: gs.students.rut,
+          card_id: gs.card_id,
+        }))
+      } else if (sess.course_id) {
+        const { data: stu } = await supabase
+          .from('students').select('*')
+          .eq('course_id', sess.course_id).order('card_id')
+        students = stu || []
+      }
+      setStudents(students)
 
       const { data: resp } = await supabase
         .from('responses').select('*').eq('session_id', sessionId)
