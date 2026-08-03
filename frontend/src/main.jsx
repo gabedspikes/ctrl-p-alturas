@@ -1,6 +1,6 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
-import { BrowserRouter, Routes, Route, NavLink, Navigate } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, NavLink, Navigate, useLocation } from 'react-router-dom'
 import { AuthProvider, useAuth } from './lib/auth'
 import AuthPage from './pages/AuthPage'
 import CoursesPage from './pages/CoursesPage'
@@ -11,7 +11,7 @@ import ScanPage from './pages/ScanPage'
 import CardGeneratorPage from './pages/CardGeneratorPage'
 import './styles.css'
 
-// ── Protected route — redirects to login if not authenticated ──
+// ── Protected route ───────────────────────────────────────
 function Protected({ children }) {
   const { user } = useAuth()
   if (user === undefined) return (
@@ -24,20 +24,17 @@ function Protected({ children }) {
   return children
 }
 
+// ── Nav layout ────────────────────────────────────────────
 function Layout({ children }) {
   const { user, signOut } = useAuth()
   const [theme, setTheme] = React.useState(
     () => localStorage.getItem('theme') || 'dark'
   )
-
   React.useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme)
     localStorage.setItem('theme', theme)
   }, [theme])
 
-  function toggleTheme() {
-    setTheme(t => t === 'dark' ? 'light' : 'dark')
-  }
   return (
     <div className="app">
       <nav className="nav">
@@ -48,12 +45,10 @@ function Layout({ children }) {
           <NavLink to="/cards" className={({isActive}) => isActive ? 'active' : ''}>Cards</NavLink>
         </div>
         <div style={{ marginLeft:'auto', display:'flex', alignItems:'center', gap:'.75rem' }}>
-          <button
-            className="btn btn-ghost btn-sm"
-            onClick={toggleTheme}
+          <button className="btn btn-ghost btn-sm"
+            onClick={() => setTheme(t => t === 'dark' ? 'light' : 'dark')}
             title="Toggle dark/light mode"
-            style={{ fontSize:'1rem', padding:'.3rem .5rem' }}
-          >
+            style={{ fontSize:'1rem', padding:'.3rem .5rem' }}>
             {theme === 'dark' ? '☀️' : '🌙'}
           </button>
           <span style={{ fontSize:'.75rem', color:'var(--muted)', maxWidth:180,
@@ -68,29 +63,43 @@ function Layout({ children }) {
   )
 }
 
-function App() {
-  const { user } = useAuth()
+// ── Router decides whether to wrap with auth ──────────────
+function AppRoutes() {
+  const location = useLocation()
+  const isScanPage = location.pathname.startsWith('/scan/')
+
+  // Scan page is fully public — render without AuthProvider involvement
+  if (isScanPage) {
+    return (
+      <Routes>
+        <Route path="/scan/:sessionId" element={<ScanPage />} />
+      </Routes>
+    )
+  }
 
   return (
-    <Routes>
-      {/* Public routes — no auth needed */}
-      <Route path="/auth" element={user ? <Navigate to="/" replace /> : <AuthPage />} />
-      <Route path="/scan/:sessionId" element={<ScanPage />} />
-
-      {/* Protected routes */}
-      <Route path="/" element={<Protected><Layout><CoursesPage /></Layout></Protected>} />
-      <Route path="/presentations" element={<Protected><Layout><PresentationsPage /></Layout></Protected>} />
-      <Route path="/presentations/:id/edit" element={<Protected><SlideEditorPage /></Protected>} />
-      <Route path="/sessions/:id" element={<Protected><SessionPage /></Protected>} />
-      <Route path="/cards" element={<Protected><CardGeneratorPage /></Protected>} />
-    </Routes>
+    <AuthProvider>
+      <Routes>
+        <Route path="/auth" element={<AuthGate />} />
+        <Route path="/scan/:sessionId" element={<ScanPage />} />
+        <Route path="/" element={<Protected><Layout><CoursesPage /></Layout></Protected>} />
+        <Route path="/presentations" element={<Protected><Layout><PresentationsPage /></Layout></Protected>} />
+        <Route path="/presentations/:id/edit" element={<Protected><SlideEditorPage /></Protected>} />
+        <Route path="/sessions/:id" element={<Protected><SessionPage /></Protected>} />
+        <Route path="/cards" element={<Protected><CardGeneratorPage /></Protected>} />
+      </Routes>
+    </AuthProvider>
   )
+}
+
+function AuthGate() {
+  const { user } = useAuth()
+  if (user) return <Navigate to="/" replace />
+  return <AuthPage />
 }
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <BrowserRouter>
-    <AuthProvider>
-      <App />
-    </AuthProvider>
+    <AppRoutes />
   </BrowserRouter>
 )
