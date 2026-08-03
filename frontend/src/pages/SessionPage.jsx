@@ -7,66 +7,30 @@ import SlideRenderer from '../components/SlideRenderer'
 const ANS_COLORS = { A:'#e8ff47', B:'#47c8ff', C:'#ffa500', D:'#ff4757' }
 const BAR_COLORS = { A:'#e8ff47', B:'#47c8ff', C:'#ffa500', D:'#ff4757' }
 
-// ── QR Code modal so teacher can open scan page on phone ──
+// ── QR Code modal ────────────────────────────────────────
 function ScanQRModal({ sessionId, onClose }) {
-  const [ip, setIp] = useState('')
-  const scanUrl = ip ? `http://${ip}:5173/scan/${sessionId}` : ''
-
-  // Try to detect local IP via WebRTC
-  useEffect(() => {
-    try {
-      const pc = new RTCPeerConnection({ iceServers: [] })
-      pc.createDataChannel('')
-      pc.createOffer().then(o => pc.setLocalDescription(o))
-      pc.onicecandidate = e => {
-        if (!e.candidate) return
-        const match = e.candidate.candidate.match(/(\d+\.\d+\.\d+\.\d+)/)
-        if (match && !match[1].startsWith('127.')) {
-          setIp(match[1])
-          pc.close()
-        }
-      }
-    } catch {}
-  }, [])
+  const scanUrl = `${window.location.origin}/scan/${sessionId}`
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal" style={{ maxWidth: 400, textAlign: 'center' }} onClick={e => e.stopPropagation()}>
         <h2 style={{ marginBottom: '.5rem' }}>Open Scanner on Phone</h2>
         <p style={{ color: 'var(--muted)', fontSize: '.85rem', marginBottom: '1.5rem' }}>
-          Make sure your phone is on the same WiFi network as this laptop.
+          Scan this QR code with your phone camera to open the scanner.
         </p>
-
-        {scanUrl ? (
-          <>
-            {/* QR code via free API */}
-            <img
-              src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(scanUrl)}`}
-              alt="Scan QR"
-              style={{ width: 200, height: 200, borderRadius: 8, border: '4px solid var(--accent)', marginBottom: '1rem' }}
-            />
-            <p style={{ fontSize: '.75rem', color: 'var(--muted)', marginBottom: '.5rem' }}>Or type this URL manually:</p>
-            <code style={{
-              display: 'block', background: 'var(--bg)', border: '1px solid var(--border)',
-              borderRadius: 6, padding: '.6rem', fontSize: '.8rem',
-              color: 'var(--accent)', wordBreak: 'break-all', marginBottom: '1rem'
-            }}>
-              {scanUrl}
-            </code>
-          </>
-        ) : (
-          <div style={{ padding: '2rem', color: 'var(--muted)' }}>
-            <p style={{ marginBottom: '1rem' }}>Detecting your IP address…</p>
-            <p style={{ fontSize: '.8rem' }}>
-              If it doesn't appear, type this in your phone's browser:<br/>
-              <code style={{ color: 'var(--accent)' }}>http://YOUR-LAPTOP-IP:5173/scan/{sessionId}</code>
-            </p>
-            <p style={{ fontSize: '.75rem', marginTop: '.75rem' }}>
-              Find your IP with: <code style={{ color: 'var(--accent)' }}>ip addr show</code> in terminal
-            </p>
-          </div>
-        )}
-
+        <img
+          src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(scanUrl)}`}
+          alt="Scan QR"
+          style={{ width: 200, height: 200, borderRadius: 8, border: '4px solid var(--accent)', marginBottom: '1rem' }}
+        />
+        <p style={{ fontSize: '.75rem', color: 'var(--muted)', marginBottom: '.5rem' }}>Or open this URL manually:</p>
+        <code style={{
+          display: 'block', background: 'var(--bg)', border: '1px solid var(--border)',
+          borderRadius: 6, padding: '.6rem', fontSize: '.75rem',
+          color: 'var(--accent)', wordBreak: 'break-all', marginBottom: '1.25rem'
+        }}>
+          {scanUrl}
+        </code>
         <button className="btn btn-ghost" onClick={onClose}>Close</button>
       </div>
     </div>
@@ -87,7 +51,7 @@ export default function SessionPage() {
   useEffect(() => {
     async function load() {
       const { data: sess } = await supabase
-        .from('sessions').select('*, presentations(title), courses(id,name)')
+        .from('sessions').select('*, presentations(title, subject), courses(id,name)')
         .eq('id', sessionId).single()
       setSession(sess)
 
@@ -178,6 +142,9 @@ export default function SessionPage() {
       }}>
         <span style={{ fontWeight:800, fontSize:'1rem' }}>{session.presentations?.title}</span>
         <span className="badge badge-blue">{session.courses?.name}</span>
+        {session.presentations?.subject && (
+          <span className="badge badge-accent">{session.presentations.subject}</span>
+        )}
         <span className={`badge ${session.status === 'active' ? 'badge-success' : 'badge-danger'}`}>
           {session.status === 'active' ? '● LIVE' : '■ FINISHED'}
         </span>

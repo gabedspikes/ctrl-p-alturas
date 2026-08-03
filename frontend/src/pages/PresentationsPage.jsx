@@ -7,6 +7,7 @@ import { FileSliders, Plus, Pencil, Trash2, Play } from 'lucide-react'
 function PresentationModal({ onClose, onSave, initial }) {
   const { user } = useAuth()
   const [title, setTitle] = useState(initial?.title || '')
+  const [subject, setSubject] = useState(initial?.subject || '')
   const [courseId, setCourseId] = useState(initial?.course_id || '')
   const [courses, setCourses] = useState([])
 
@@ -18,9 +19,9 @@ function PresentationModal({ onClose, onSave, initial }) {
   async function submit(e) {
     e.preventDefault()
     if (initial?.id) {
-      await supabase.from('presentations').update({ title, course_id: courseId }).eq('id', initial.id)
+      await supabase.from('presentations').update({ title, subject: subject || null, course_id: courseId }).eq('id', initial.id)
     } else {
-      await supabase.from('presentations').insert({ title, course_id: courseId, teacher_id: user.id })
+      await supabase.from('presentations').insert({ title, subject: subject || null, course_id: courseId, teacher_id: user.id })
     }
     onSave()
   }
