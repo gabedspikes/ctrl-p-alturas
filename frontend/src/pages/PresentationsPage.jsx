@@ -36,6 +36,14 @@ function PresentationModal({ onClose, onSave, initial }) {
             <input value={title} onChange={e => setTitle(e.target.value)} required placeholder="e.g. Chapter 5 Quiz" />
           </div>
           <div className="form-group">
+            <label>SUBJECT (optional)</label>
+            <input
+              value={subject}
+              onChange={e => setSubject(e.target.value)}
+              placeholder="e.g. Mathematics, Science, History"
+            />
+          </div>
+          <div className="form-group">
             <label>CLASS</label>
             <select value={courseId} onChange={e => setCourseId(e.target.value)} required>
               {courses.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
@@ -129,9 +137,10 @@ export default function PresentationsPage() {
             <div key={p.id} className="card" style={{ display:'flex', flexDirection:'column', gap:'.75rem' }}>
               <div>
                 <h3>{p.title}</h3>
-                <span className="badge badge-blue" style={{ marginTop:'.35rem' }}>
-                  {p.courses?.name || 'No class'}
-                </span>
+                <div style={{ display:'flex', gap:'.35rem', marginTop:'.35rem', flexWrap:'wrap' }}>
+                  <span className="badge badge-blue">{p.courses?.name || 'No class'}</span>
+                  {p.subject && <span className="badge badge-accent">{p.subject}</span>}
+                </div>
               </div>
               <div style={{ display:'flex', gap:'.5rem', marginTop:'auto' }}>
                 <button className="btn btn-ghost btn-sm" onClick={() => navigate(`/presentations/${p.id}/edit`)}>
