@@ -2,26 +2,70 @@ import React, { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../lib/auth'
 import { supabase } from '../lib/supabase'
-import { FileSliders, Plus, Pencil, Trash2, Play } from 'lucide-react'
+import { FileSliders, Plus, Pencil, Trash2, Play, AlertCircle } from 'lucide-react'
 
+// ── Modal: Create / Edit Presentation ───────────────────
 function PresentationModal({ onClose, onSave, initial }) {
   const { user } = useAuth()
-  const [title, setTitle] = useState(initial?.title || '')
-  const [subject, setSubject] = useState(initial?.subject || '')
-  const [courseId, setCourseId] = useState(initial?.course_id || '')
-  const [courses, setCourses] = useState([])
+  const [title, setTitle]         = useState(initial?.title || '')
+  const [subjectId, setSubjectId] = useState(initial?.subject_id || '')
+  const [courseId, setCourseId]   = useState(initial?.course_id || '')
+  const [courses, setCourses]     = useState([])
+  const [subjects, setSubjects]   = useState([]) // teacher's assigned subjects
+  const [loading, setLoading]     = useState(true)
 
   useEffect(() => {
-    supabase.from('courses').select('id,name').order('name')
-      .then(({ data }) => { setCourses(data || []); if (!courseId && data?.[0]) setCourseId(data[0].id) })
+    async function load() {
+      // Load courses and teacher's assigned subjects in parallel
+      const [{ data: courseData }, { data: subjectData }] = await Promise.all([
+        supabase.from('courses').select('id, name').order('name'),
+        supabase
+          .from('teacher_subjects')
+          .select('subject_id, subjects(id, name, level_id, course_levels(name))')
+          .eq('teacher_id', user.id)
+          .eq('subjects.active', true)
+          .order('subject_id')
+      ])
+
+      setCourses(courseData || [])
+
+      // Flatten the joined subject data
+      const flat = (subjectData || [])
+        .map(row => row.subjects)
+        .filter(Boolean)
+        .sort((a, b) => a.name.localeCompare(b.name, 'es'))
+
+      setSubjects(flat)
+
+      // Set defaults
+      if (!courseId && courseData?.[0]) setCourseId(courseData[0].id)
+      if (!subjectId && flat[0]) setSubjectId(flat[0].id)
+
+      setLoading(false)
+    }
+    load()
   }, [])
 
   async function submit(e) {
     e.preventDefault()
+    const selectedSubject = subjects.find(s => s.id === subjectId)
+    const subjectName = selectedSubject?.name || null
+
     if (initial?.id) {
-      await supabase.from('presentations').update({ title, subject: subject || null, course_id: courseId }).eq('id', initial.id)
+      await supabase.from('presentations').update({
+        title,
+        subject_id:   subjectId   || null,
+        subject:      subjectName,  // keep text copy for display
+        course_id:    courseId,
+      }).eq('id', initial.id)
     } else {
-      await supabase.from('presentations').insert({ title, subject: subject || null, course_id: courseId, teacher_id: user.id })
+      await supabase.from('presentations').insert({
+        title,
+        subject_id:   subjectId   || null,
+        subject:      subjectName,
+        course_id:    courseId,
+        teacher_id:   user.id,
+      })
     }
     onSave()
   }
@@ -30,70 +74,128 @@ function PresentationModal({ onClose, onSave, initial }) {
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal" onClick={e => e.stopPropagation()}>
         <h2>{initial ? 'Edit Test' : 'New Test'}</h2>
-        <form onSubmit={submit}>
-          <div className="form-group">
-            <label>TEST TITLE</label>
-            <input value={title} onChange={e => setTitle(e.target.value)} required placeholder="e.g. Chapter 5 Quiz" />
-          </div>
-          <div className="form-group">
-            <label>SUBJECT (optional)</label>
-            <input
-              value={subject}
-              onChange={e => setSubject(e.target.value)}
-              placeholder="e.g. Mathematics, Science, History"
-            />
-          </div>
-          <div className="form-group">
-            <label>CLASS</label>
-            <select value={courseId} onChange={e => setCourseId(e.target.value)} required>
-              {courses.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </select>
-          </div>
-          <div className="modal-footer">
-            <button type="button" className="btn btn-ghost" onClick={onClose}>Cancel</button>
-            <button type="submit" className="btn btn-primary">Save</button>
-          </div>
-        </form>
+
+        {loading ? (
+          <p style={{ color:'var(--muted)', fontSize:'.875rem', padding:'1rem 0' }}>Loading…</p>
+        ) : (
+          <form onSubmit={submit}>
+
+            <div className="form-group">
+              <label>TEST TITLE</label>
+              <input
+                value={title}
+                onChange={e => setTitle(e.target.value)}
+                required
+                placeholder="e.g. Prueba Capítulo 5"
+              />
+            </div>
+
+            <div className="form-group">
+              <label>SUBJECT</label>
+              {subjects.length === 0 ? (
+                <div style={{
+                  display:'flex', alignItems:'flex-start', gap:'.5rem',
+                  background:'rgba(255,71,87,.08)', border:'1px solid rgba(255,71,87,.25)',
+                  borderRadius:'var(--radius)', padding:'.75rem', fontSize:'.82rem',
+                  color:'var(--danger)', lineHeight: 1.5,
+                }}>
+                  <AlertCircle size={16} style={{ flexShrink:0, marginTop:2 }}/>
+                  <span>
+                    No subjects assigned to your account yet. Ask your administrator
+                    to add your subjects in the Supabase dashboard
+                    (teacher_subjects table).
+                  </span>
+                </div>
+              ) : (
+                <select
+                  value={subjectId}
+                  onChange={e => setSubjectId(e.target.value)}
+                  required
+                >
+                  <option value="">— Select a subject —</option>
+                  {subjects.map(s => (
+                    <option key={s.id} value={s.id}>
+                      {s.name}
+                      {s.course_levels?.name ? ` (${s.course_levels.name})` : ''}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </div>
+
+            <div className="form-group">
+              <label>CLASS</label>
+              <select
+                value={courseId}
+                onChange={e => setCourseId(e.target.value)}
+                required
+              >
+                {courses.map(c => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+              </select>
+            </div>
+
+            <div className="modal-footer">
+              <button type="button" className="btn btn-ghost" onClick={onClose}>Cancel</button>
+              <button
+                type="submit"
+                className="btn btn-primary"
+                disabled={subjects.length === 0}
+              >
+                Save
+              </button>
+            </div>
+          </form>
+        )}
       </div>
     </div>
   )
 }
 
+// ── Modal: Start Session ─────────────────────────────────
 function StartSessionModal({ presentation, onClose }) {
   const navigate = useNavigate()
+
   async function start() {
-    // get first slide
     const { data: slides } = await supabase
-      .from('slides').select('id').eq('presentation_id', presentation.id)
+      .from('slides').select('id')
+      .eq('presentation_id', presentation.id)
       .order('slide_order').limit(1)
+
     const { data: session } = await supabase.from('sessions').insert({
-      presentation_id: presentation.id,
-      course_id: presentation.course_id,
+      presentation_id:  presentation.id,
+      course_id:        presentation.course_id,
       current_slide_id: slides?.[0]?.id || null,
-      status: 'active'
+      status:           'active',
     }).select().single()
+
     navigate(`/sessions/${session.id}`)
   }
+
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal" onClick={e => e.stopPropagation()}>
         <h2>Start Session</h2>
         <p style={{ color:'var(--muted)', fontSize:'.875rem', marginBottom:'1.5rem' }}>
-          Launch <strong style={{color:'var(--text)'}}>{presentation.title}</strong> as a live session.
+          Launch <strong style={{ color:'var(--text)' }}>{presentation.title}</strong> as a live session.
           Students will use their printed cards to answer.
         </p>
         <div className="modal-footer">
           <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
-          <button className="btn btn-primary" onClick={start}><Play size={13}/> Start</button>
+          <button className="btn btn-primary" onClick={start}>
+            <Play size={13}/> Start
+          </button>
         </div>
       </div>
     </div>
   )
 }
 
+// ── Page ─────────────────────────────────────────────────
 export default function PresentationsPage() {
   const [presentations, setPresentations] = useState([])
-  const [modal, setModal] = useState(null)
+  const [modal, setModal]               = useState(null)
   const [sessionModal, setSessionModal] = useState(null)
   const navigate = useNavigate()
 
@@ -117,7 +219,10 @@ export default function PresentationsPage() {
     <>
       <div className="page-header">
         <div>
-          <h1><FileSliders size={20} style={{ verticalAlign:'middle', marginRight:'.4rem' }}/>Tests</h1>
+          <h1>
+            <FileSliders size={20} style={{ verticalAlign:'middle', marginRight:'.4rem' }}/>
+            Tests
+          </h1>
           <p>Create slide-based tests and launch live scanning sessions.</p>
         </div>
         <button className="btn btn-primary" onClick={() => setModal('new')}>
@@ -137,13 +242,14 @@ export default function PresentationsPage() {
             <div key={p.id} className="card" style={{ display:'flex', flexDirection:'column', gap:'.75rem' }}>
               <div>
                 <h3>{p.title}</h3>
-                <div style={{ display:'flex', gap:'.35rem', marginTop:'.35rem', flexWrap:'wrap' }}>
+                <div style={{ display:'flex', gap:'.35rem', marginTop:'.5rem', flexWrap:'wrap' }}>
                   <span className="badge badge-blue">{p.courses?.name || 'No class'}</span>
                   {p.subject && <span className="badge badge-accent">{p.subject}</span>}
                 </div>
               </div>
-              <div style={{ display:'flex', gap:'.5rem', marginTop:'auto' }}>
-                <button className="btn btn-ghost btn-sm" onClick={() => navigate(`/presentations/${p.id}/edit`)}>
+              <div style={{ display:'flex', gap:'.5rem', marginTop:'auto', flexWrap:'wrap' }}>
+                <button className="btn btn-ghost btn-sm"
+                  onClick={() => navigate(`/presentations/${p.id}/edit`)}>
                   <Pencil size={12}/> Edit Slides
                 </button>
                 <button className="btn btn-primary btn-sm" onClick={() => setSessionModal(p)}>
