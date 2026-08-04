@@ -57,11 +57,11 @@ function PresentationModal({ onClose, onSave, initial }) {
         <h2>{initial ? 'Edit Test' : 'New Test'}</h2>
 
         {loading ? (
-          <p style={{ color:'var(--muted)', padding:'1rem 0' }}>Loading your assignments…</p>
+          <p style={{ color:'var(--muted)', padding:'1rem 0' }}>Cargando...</p>
         ) : (
           <form onSubmit={submit}>
             <div className="form-group">
-              <label>TEST TITLE</label>
+              <label>TÍTULO DE TEST</label>
               <input
                 value={title}
                 onChange={e => setTitle(e.target.value)}
@@ -81,8 +81,7 @@ function PresentationModal({ onClose, onSave, initial }) {
                 }}>
                   <AlertCircle size={16} style={{ flexShrink:0, marginTop:2 }}/>
                   <span>
-                    No assignments found for {CURRENT_YEAR}. Ask your administrator to add
-                    your courses and subjects in the teacher_courses table.
+                    No se encontraron tests para {CURRENT_YEAR}.
                   </span>
                 </div>
               ) : (
@@ -92,7 +91,7 @@ function PresentationModal({ onClose, onSave, initial }) {
                     onChange={e => setTeacherCourseId(e.target.value)}
                     required
                   >
-                    <option value="">— Select class and subject —</option>
+                    <option value="">— Selecciona Curso y Asignatura —</option>
                     {assignments.map(a => (
                       <option key={a.id} value={a.id}>
                         {a.courses?.name} — {a.subjects?.name}
@@ -100,8 +99,8 @@ function PresentationModal({ onClose, onSave, initial }) {
                     ))}
                   </select>
                   <p style={{ fontSize:'.72rem', color:'var(--muted)', marginTop:'.35rem' }}>
-                    Each option shows the class and subject together.
-                    Contact your admin to add missing combinations.
+                    Cada opción muestra el curso y la asignatura juntos.
+                    Contacta a tu administrador para agregar combinaciones faltantes.
                   </p>
                 </>
               )}
@@ -166,7 +165,7 @@ function StartSessionModal({ presentation, onClose }) {
         <h2>Start Session</h2>
         <p style={{ color:'var(--muted)', fontSize:'.875rem', marginBottom:'1.5rem' }}>
           Launch <strong style={{ color:'var(--text)' }}>{presentation.title}</strong> as a live session.
-          Students will use their printed cards to answer.
+          Los estudiantes responderán usando sus tarjetas impresas.
         </p>
         {presentation.subject && (
           <div style={{ display:'flex', gap:'.4rem', marginBottom:'1.25rem' }}>
@@ -216,7 +215,7 @@ export default function PresentationsPage() {
             <FileSliders size={20} style={{ verticalAlign:'middle', marginRight:'.4rem' }}/>
             Tests
           </h1>
-          <p>Create slide-based tests and launch live scanning sessions.</p>
+          <p>Crea tests basados en diapositivas y lanza sesiones de escaneo en vivo.</p>
         </div>
         <button className="btn btn-primary" onClick={() => setModal('new')}>
           <Plus size={14}/> New Test
@@ -226,8 +225,8 @@ export default function PresentationsPage() {
       {presentations.length === 0 ? (
         <div className="empty">
           <div className="empty-icon">📋</div>
-          <h3>No tests yet</h3>
-          <p>Create your first test to build slides and questions.</p>
+          <h3>No hay Tests creados</h3>
+          <p>Crea tu primer test para construir diapositivas y preguntas.</p>
         </div>
       ) : (
         <div className="card-grid">
@@ -243,10 +242,10 @@ export default function PresentationsPage() {
               <div style={{ display:'flex', gap:'.5rem', marginTop:'auto', flexWrap:'wrap' }}>
                 <button className="btn btn-ghost btn-sm"
                   onClick={() => navigate(`/presentations/${p.id}/edit`)}>
-                  <Pencil size={12}/> Edit Slides
+                  <Pencil size={12}/> Editar Diapositivas
                 </button>
                 <button className="btn btn-primary btn-sm" onClick={() => setSessionModal(p)}>
-                  <Play size={12}/> Run
+                  <Play size={12}/> Ejecutar
                 </button>
                 <button className="btn btn-ghost btn-sm" onClick={() => setModal(p)}>Edit</button>
                 <button className="btn btn-danger btn-sm" onClick={() => deletePresentation(p.id)}>

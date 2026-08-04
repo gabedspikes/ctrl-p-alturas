@@ -14,9 +14,9 @@ function ScanQRModal({ sessionId, onClose }) {
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal" style={{ maxWidth: 400, textAlign: 'center' }} onClick={e => e.stopPropagation()}>
-        <h2 style={{ marginBottom: '.5rem' }}>Open Scanner on Phone</h2>
+        <h2 style={{ marginBottom: '.5rem' }}>Abrir Escáner en el Móvil</h2>
         <p style={{ color: 'var(--muted)', fontSize: '.85rem', marginBottom: '1.5rem' }}>
-          Scan this QR code with your phone camera to open the scanner.
+          Escanea este código QR con la cámara de tu teléfono para abrir el escáner.
         </p>
         <img
           src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(scanUrl)}`}

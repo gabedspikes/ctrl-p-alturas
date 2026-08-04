@@ -99,13 +99,13 @@ function ImportModal({ generationId, existingCardIds, onClose, onSave }) {
           <>
             <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'1rem' }}>
               <div className="form-group">
-                <label>NAME COLUMN</label>
+                <label>COLUMNA DE NOMBRE</label>
                 <select value={nameCol} onChange={e => setNameCol(e.target.value)}>
                   {headers.map(h => <option key={h} value={h}>{h}</option>)}
                 </select>
               </div>
               <div className="form-group">
-                <label>RUT COLUMN (optional)</label>
+                <label>RUT (optional)</label>
                 <select value={rutCol} onChange={e => setRutCol(e.target.value)}>
                   <option value="">— none —</option>
                   {headers.map(h => <option key={h} value={h}>{h}</option>)}
@@ -124,7 +124,7 @@ function ImportModal({ generationId, existingCardIds, onClose, onSave }) {
                 </div>
                 <div style={{ maxHeight:180, overflowY:'auto', border:'1px solid var(--border)', borderRadius:'var(--radius)' }}>
                   <table className="table">
-                    <thead><tr><th>NAME</th><th>RUT</th><th>CARD #</th></tr></thead>
+                    <thead><tr><th>NOMBRE</th><th>RUT</th><th>TARJETA #</th></tr></thead>
                     <tbody>
                       {preview.slice(0,20).map((r,i) => (
                         <tr key={i}>
@@ -184,20 +184,20 @@ function AddStudentModal({ generationId, existingCardIds, onClose, onSave }) {
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal" onClick={e => e.stopPropagation()}>
-        <h2>Add Student</h2>
+        <h2>Agregar Estudiante</h2>
         <form onSubmit={submit}>
-          <div className="form-group"><label>STUDENT NAME</label>
-            <input value={name} onChange={e => setName(e.target.value)} required placeholder="Full name"/>
+          <div className="form-group"><label>NOMBRE</label>
+            <input value={name} onChange={e => setName(e.target.value)} required placeholder="Nombre completo"/>
           </div>
-          <div className="form-group"><label>RUT (optional)</label>
+          <div className="form-group"><label>RUT (opcional)</label>
             <input value={rut} onChange={e => setRut(e.target.value)} placeholder="e.g. 12345678-9"/>
           </div>
-          <div className="form-group"><label>CARD ID (1–50)</label>
+          <div className="form-group"><label>ID DE TARJETA (1–50)</label>
             <input type="number" min="1" max="50" value={cardId} onChange={e => setCardId(e.target.value)} required/>
           </div>
           <div className="modal-footer">
-            <button type="button" className="btn btn-ghost" onClick={onClose}>Cancel</button>
-            <button type="submit" className="btn btn-primary">Add Student</button>
+            <button type="button" className="btn btn-ghost" onClick={onClose}>Cancelar</button>
+            <button type="submit" className="btn btn-primary">Agregar Estudiante</button>
           </div>
         </form>
       </div>
@@ -318,14 +318,14 @@ function CourseCard({ course }) {
               {genStudents.length > 0 && (
                 <button className="btn btn-ghost btn-sm"
                   onClick={() => navigate(`/cards?course=${course.id}`)}>
-                  <Printer size={12}/> Print Cards
+                  <Printer size={12}/> Imprimir Tarjetas
                 </button>
               )}
               <button className="btn btn-ghost btn-sm" onClick={() => setShowImport(true)}>
-                <Upload size={12}/> Import CSV
+                <Upload size={12}/> Importar CSV
               </button>
               <button className="btn btn-primary btn-sm" onClick={() => setShowAdd(true)}>
-                <Plus size={12}/> Add
+                <Plus size={12}/> Agregar Estudiante
               </button>
             </div>
           </div>
@@ -335,7 +335,7 @@ function CourseCard({ course }) {
           ) : (
             <table className="table">
               <thead>
-                <tr><th>NAME</th><th>RUT</th><th>CARD #</th><th>STATUS</th><th></th></tr>
+                <tr><th>NOMBRE</th><th>RUT</th><th>TARJETA #</th><th>STATUS</th><th></th></tr>
               </thead>
               <tbody>
                 {genStudents.map(gs => (
@@ -429,8 +429,8 @@ export default function CoursesPage() {
     <>
       <div className="page-header">
         <div>
-          <h1><Users size={20} style={{ verticalAlign:'middle', marginRight:'.4rem' }}/>Classes</h1>
-          <p>View your assigned classes and manage student rosters for {CURRENT_YEAR}.</p>
+          <h1><Users size={20} style={{ verticalAlign:'middle', marginRight:'.4rem' }}/>Cursos</h1>
+          <p>Ver cursos para {CURRENT_YEAR}.</p>
         </div>
       </div>
 
@@ -444,7 +444,7 @@ export default function CoursesPage() {
           onChange={e => setFilterLevel(e.target.value)}
           style={{ minWidth:200 }}
         >
-          <option value="">All levels</option>
+          <option value="">Todos los cursos</option>
           {levels.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
         </select>
 
@@ -458,7 +458,7 @@ export default function CoursesPage() {
             onChange={e => setMyCoursesOnly(e.target.checked)}
             style={{ width:'auto' }}
           />
-          Show only my assigned classes
+          Mostrar solo mis clases asignadas
         </label>
 
         {myCourseIds.size === 0 && myCoursesOnly && (
@@ -469,17 +469,17 @@ export default function CoursesPage() {
             borderRadius:'var(--radius)', padding:'.4rem .75rem'
           }}>
             <AlertCircle size={14}/>
-            No courses assigned to you for {CURRENT_YEAR}. Ask your admin to add them in teacher_courses.
+            No tienes cursos asignados para {CURRENT_YEAR}. Pregunta a tu administrador que te agregue en teacher_courses.
           </div>
         )}
       </div>
 
       {loading ? (
-        <p style={{ color:'var(--muted)' }}>Loading classes…</p>
+        <p style={{ color:'var(--muted)' }}>Cargando Cursos…</p>
       ) : filtered.length === 0 ? (
         <div className="empty">
           <div className="empty-icon">🏫</div>
-          <h3>No classes found</h3>
+          <h3>No se han encontrado cursos</h3>
           <p>{myCoursesOnly ? 'Try unchecking "my assigned classes" to see all.' : 'No classes match the current filter.'}</p>
         </div>
       ) : (

@@ -404,7 +404,7 @@ export default function ScanPage() {
               {status === 'loading' ? 'Loading…' : 'Starting camera…'}
             </p>
             <p style={{ color: '#666', fontSize: '.8rem', marginTop: '.35rem' }}>
-              Allow camera access when prompted
+              Permite el acceso a la cámara para escanear tarjetas.
             </p>
           </div>
         )}

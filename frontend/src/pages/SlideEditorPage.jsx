@@ -213,7 +213,7 @@ export default function SlideEditorPage() {
         <div style={{ marginLeft:'auto', display:'flex', gap:'.5rem', alignItems:'center' }}>
           {dirty && (
             <span style={{ fontSize:'.75rem', color:'var(--muted)', fontStyle:'italic' }}>
-              Unsaved changes
+              Cambios no guardados
             </span>
           )}
           <button className="btn btn-primary btn-sm" onClick={saveSlide} disabled={saving}>
@@ -331,7 +331,7 @@ export default function SlideEditorPage() {
           <div style={{ padding:'1rem', borderBottom:'1px solid var(--border)' }}>
             <label style={{ display:'block', fontSize:'.7rem', color:'var(--muted)',
               fontWeight:700, letterSpacing:'.1em', marginBottom:'.75rem' }}>
-              ANSWERS — click the letter to set correct answer
+              RESPUESTAS — selecciona la letra correcta
             </label>
             {['A','B','C','D'].map(l => {
               const field = `answer_${l.toLowerCase()}`
@@ -384,7 +384,7 @@ export default function SlideEditorPage() {
                   color:'#fff', cursor:'pointer', padding:'3px 6px', fontSize:12,
                   display:'flex', alignItems:'center', gap:3,
                 }}>
-                  <X size={11}/> Remove
+                  <X size={11}/> Quitar
                 </button>
               </div>
             ) : (
@@ -409,7 +409,7 @@ export default function SlideEditorPage() {
           <div style={{ padding:'1rem' }}>
             <label style={{ display:'block', fontSize:'.7rem', color:'var(--muted)',
               fontWeight:700, letterSpacing:'.1em', marginBottom:'.75rem' }}>
-              BACKGROUND
+              FONDO
             </label>
             <div style={{ display:'flex', gap:'.4rem', flexWrap:'wrap' }}>
               {BG_PRESETS.map(({ color, label }) => (

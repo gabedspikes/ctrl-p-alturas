@@ -49,14 +49,14 @@ export default function InstallPrompt() {
     }}>
       <span style={{ fontSize: '1.5rem' }}>📲</span>
       <div style={{ flex: 1 }}>
-        <div style={{ fontWeight: 700, fontSize: '.9rem' }}>Install CTRL-P-ALT</div>
+        <div style={{ fontWeight: 700, fontSize: '.9rem' }}>Instalar CTRL-P-ALT</div>
         <div style={{ fontSize: '.78rem', color: 'var(--muted)', marginTop: '.1rem' }}>
-          Install on your phone for faster access and camera scanning
+          Instala esta aplicación en tu dispositivo para acceder a ella más rápido y sin conexión.
         </div>
       </div>
       <div style={{ display: 'flex', gap: '.5rem', flexShrink: 0 }}>
-        <button className="btn btn-ghost btn-sm" onClick={() => setShow(false)}>Later</button>
-        <button className="btn btn-primary btn-sm" onClick={install}>Install</button>
+        <button className="btn btn-ghost btn-sm" onClick={() => setShow(false)}>Más tarde</button>
+        <button className="btn btn-primary btn-sm" onClick={install}>Instalar</button>
       </div>
     </div>
   )

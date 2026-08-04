@@ -48,7 +48,7 @@ export default function AuthPage() {
             ◈ CTRL-P-ALT
           </div>
           <p style={{ color: 'var(--muted)', fontSize: '.85rem', marginTop: '.4rem' }}>
-            Interactive classroom response system
+            Sistema de respuestas interactivas para clases
           </p>
         </div>
 
@@ -70,7 +70,7 @@ export default function AuthPage() {
             </div>
 
             <div className="form-group">
-              <label>PASSWORD</label>
+              <label>CONTRASEÑA</label>
               <input
                 type="password" value={password} required
                 onChange={e => setPassword(e.target.value)}
@@ -81,7 +81,7 @@ export default function AuthPage() {
 
             {mode === 'signup' && (
               <div className="form-group">
-                <label>CONFIRM PASSWORD</label>
+                <label>CONFIRMAR CONTRASEÑA</label>
                 <input
                   type="password" value={confirm} required
                   onChange={e => setConfirm(e.target.value)}
@@ -127,24 +127,24 @@ export default function AuthPage() {
           }}>
             {mode === 'login' ? (
               <>
-                No account yet?{' '}
+                ¿Aun no estas registrado?{' '}
                 <button
                   className="btn btn-ghost btn-sm"
                   style={{ border: 'none', color: 'var(--accent)', padding: '0 .25rem' }}
                   onClick={() => { setMode('signup'); setError(''); setMessage('') }}
                 >
-                  Sign up
+                  Unirse
                 </button>
               </>
             ) : (
               <>
-                Already have an account?{' '}
+                ¿Ya tienes una cuenta?{' '}
                 <button
                   className="btn btn-ghost btn-sm"
                   style={{ border: 'none', color: 'var(--accent)', padding: '0 .25rem' }}
                   onClick={() => { setMode('login'); setError(''); setMessage('') }}
                 >
-                  Sign in
+                  Entrar
                 </button>
               </>
             )}

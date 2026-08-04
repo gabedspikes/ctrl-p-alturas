@@ -41,14 +41,14 @@ function Layout({ children }) {
       <nav className="nav">
         <span className="nav-logo">◈ CTRL-P-ALT</span>
         <div className="nav-links">
-          <NavLink to="/" end className={({isActive}) => isActive ? 'active' : ''}>Classes</NavLink>
+          <NavLink to="/" end className={({isActive}) => isActive ? 'active' : ''}>Cursos</NavLink>
           <NavLink to="/presentations" className={({isActive}) => isActive ? 'active' : ''}>Tests</NavLink>
-          <NavLink to="/cards" className={({isActive}) => isActive ? 'active' : ''}>Cards</NavLink>
+          <NavLink to="/cards" className={({isActive}) => isActive ? 'active' : ''}>Tarjetas</NavLink>
         </div>
         <div style={{ marginLeft:'auto', display:'flex', alignItems:'center', gap:'.75rem' }}>
           <button className="btn btn-ghost btn-sm"
             onClick={() => setTheme(t => t === 'dark' ? 'light' : 'dark')}
-            title="Toggle dark/light mode"
+            title="Cambiar modo Oscuro/Modo Claro"
             style={{ fontSize:'1rem', padding:'.3rem .5rem' }}>
             {theme === 'dark' ? '☀️' : '🌙'}
           </button>
@@ -56,7 +56,9 @@ function Layout({ children }) {
             overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
             {user?.email}
           </span>
-          <button className="btn btn-ghost btn-sm" onClick={signOut}>Sign out</button>
+          <button className="btn btn-ghost btn-sm" onClick={signOut} title="Cerrar sesión">
+            Cerrar sesión
+          </button>
         </div>
       </nav>
       <main className="main">{children}</main>
