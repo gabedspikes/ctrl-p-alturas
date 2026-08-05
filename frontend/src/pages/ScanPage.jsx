@@ -109,7 +109,7 @@ export default function ScanPage() {
       setSessionInfo(sess)
       setCurrentSlideId(sess.current_slide_id)
 
-      // Load students from generation if available, else fall back
+    // Students always come from the generation (course fallback removed)
       let studs = []
       if (sess.generation_id) {
         const { data: genStu } = await supabase
@@ -123,10 +123,6 @@ export default function ScanPage() {
           rut: gs.students.rut,
           card_id: gs.card_id,
         }))
-      } else if (sess.course_id) {
-        const { data: fallback } = await supabase
-          .from('students').select('*').eq('course_id', sess.course_id)
-        studs = fallback || []
       }
       const map = {}
       studs.forEach(s => { map[s.card_id] = s })

@@ -50,8 +50,8 @@ export default function SessionPage() {
 
   useEffect(() => {
     async function load() {
-      const { data: sess } = await supabase
-        .from('sessions').select('*, presentations(title, subject), courses(id,name), generations(id, year)')
+     const { data: sess } = await supabase
+        .from('sessions').select('*, presentations(title, subjects(name)), courses(id,name), generations(id, year)')
         .eq('id', sessionId).single()
       setSession(sess)
 
@@ -60,7 +60,7 @@ export default function SessionPage() {
         .eq('presentation_id', sess.presentation_id).order('slide_order')
       setSlides(sl || [])
 
-      // Load students from generation if available, else fall back to course students
+      // Students always come from the generation (course fallback removed)
       let students = []
       if (sess.generation_id) {
         const { data: genStu } = await supabase
@@ -75,11 +75,6 @@ export default function SessionPage() {
           rut: gs.students.rut,
           card_id: gs.card_id,
         }))
-      } else if (sess.course_id) {
-        const { data: stu } = await supabase
-          .from('students').select('*')
-          .eq('course_id', sess.course_id).order('card_id')
-        students = stu || []
       }
       setStudents(students)
 
@@ -134,12 +129,11 @@ export default function SessionPage() {
     if (unresponded.length === 0) return alert('All students already answered.')
     const student = unresponded[Math.floor(Math.random() * unresponded.length)]
     const is_correct = slide.correct_answer ? answer === slide.correct_answer : null
+    // No manual re-fetch: the realtime INSERT subscription appends the new row.
     await supabase.from('responses').insert({
       session_id: sessionId, slide_id: slide.id,
       student_id: student.id, answer, is_correct
     })
-    const { data } = await supabase.from('responses').select('*').eq('session_id', sessionId)
-    setResponses(data || [])
   }
 
   if (!session) return <div style={{ padding:'2rem', color:'var(--muted)' }}>Loading session…</div>
@@ -160,8 +154,8 @@ export default function SessionPage() {
       }}>
         <span style={{ fontWeight:800, fontSize:'1rem' }}>{session.presentations?.title}</span>
         <span className="badge badge-blue">{session.courses?.name}</span>
-        {session.presentations?.subject && (
-          <span className="badge badge-accent">{session.presentations.subject}</span>
+        {session.presentations?.subjects?.name && (
+          <span className="badge badge-accent">{session.presentations.subjects.name}</span>
         )}
         <span className={`badge ${session.status === 'active' ? 'badge-success' : 'badge-danger'}`}>
           {session.status === 'active' ? '● LIVE' : '■ FINISHED'}
