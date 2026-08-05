@@ -71,7 +71,7 @@ function PresentationModal({ onClose, onSave, initial }) {
             </div>
 
             <div className="form-group">
-              <label>CLASS & SUBJECT</label>
+              <label>CLASE Y MATERIA</label>
               {assignments.length === 0 ? (
                 <div style={{
                   display:'flex', alignItems:'flex-start', gap:'.5rem',
@@ -107,7 +107,7 @@ function PresentationModal({ onClose, onSave, initial }) {
             </div>
 
             <div className="modal-footer">
-              <button type="button" className="btn btn-ghost" onClick={onClose}>Cancel</button>
+              <button type="button" className="btn btn-ghost" onClick={onClose}>Cancelar</button>
               <button
                 type="submit"
                 className="btn btn-primary"
