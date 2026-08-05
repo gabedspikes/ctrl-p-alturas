@@ -50,10 +50,21 @@ export default function SessionPage() {
 
   useEffect(() => {
     async function load() {
-     const { data: sess } = await supabase
-        .from('sessions').select('*, presentations(title, subjects(name)), courses(id,name), generations(id, year)')
+     const { data: sess, error: sessErr } = await supabase
+        .from('sessions')
+        .select('*, presentations(title, subject_id), courses(id,name), generations(id, year)')
         .eq('id', sessionId).single()
+      if (sessErr || !sess) { console.error('Session load failed:', sessErr); return }
       setSession(sess)
+
+      // Traer el nombre del subject por separado (evita join anidado frágil)
+      if (sess.presentations?.subject_id) {
+        const { data: subj } = await supabase
+          .from('subjects').select('name')
+          .eq('id', sess.presentations.subject_id).single()
+        sess.presentations.subject_name = subj?.name || null
+        setSession({ ...sess })
+      }
 
       const { data: sl } = await supabase
         .from('slides').select('*')
@@ -154,8 +165,8 @@ export default function SessionPage() {
       }}>
         <span style={{ fontWeight:800, fontSize:'1rem' }}>{session.presentations?.title}</span>
         <span className="badge badge-blue">{session.courses?.name}</span>
-        {session.presentations?.subjects?.name && (
-          <span className="badge badge-accent">{session.presentations.subjects.name}</span>
+        {session.presentations?.subject_name && (
+          <span className="badge badge-accent">{session.presentations.subject_name}</span>
         )}
         <span className={`badge ${session.status === 'active' ? 'badge-success' : 'badge-danger'}`}>
           {session.status === 'active' ? '● LIVE' : '■ FINISHED'}
