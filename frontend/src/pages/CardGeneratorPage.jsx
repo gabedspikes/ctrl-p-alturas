@@ -87,7 +87,7 @@ function triggerPrint(svgElements, title) {
     ${svgElements.map(s => `
       <div class="card-wrap">
         ${s}
-        <div class="hint">A↑ B→ C↓ D← · rotate so answer points UP</div>
+        <div class="hint">A↑ B→ C↓ D← · rotar para que la respuesta este arriba</div>
       </div>`).join('')}
   </div>
   <script>window.onload = () => setTimeout(() => window.print(), 400)</script>
@@ -154,8 +154,8 @@ export default function CardGeneratorPage() {
   function printCards() {
     const svgs = printRef.current.querySelectorAll('svg')
     const title = selectedCourse
-      ? `Cards — ${courses.find(c => c.id === selectedCourse)?.name || 'Class'}`
-      : 'All Cards'
+      ? `Tarjetas — ${courses.find(c => c.id === selectedCourse)?.name || 'Cursos'}`
+      : 'Todas las tarjetas'
     triggerPrint(Array.from(svgs).map(s => s.outerHTML), title)
   }
 
@@ -174,12 +174,12 @@ export default function CardGeneratorPage() {
             <h1>Student Cards</h1>
             <p style={{ color:'var(--muted)', fontSize:'.85rem', marginTop:'.2rem' }}>
               {selectedCourse && students.length > 0
-                ? `Showing ${students.length} cards for ${courseName}`
-                : `Showing all ${availableIds.length} available cards`}
+                ? `Mostrando ${students.length} trajetas para ${courseName}`
+                : `Mostrando las ${availableIds.length} trajetas disponibles`}
             </p>
           </div>
           <button className="btn btn-primary" onClick={printCards}>
-            <Printer size={14}/> Print Cards
+            <Printer size={14}/> Imprimir tarjetas
           </button>
         </div>
 
@@ -190,21 +190,21 @@ export default function CardGeneratorPage() {
           display:'flex', alignItems:'center', gap:'1rem', flexWrap:'wrap'
         }}>
           <label style={{ color:'var(--muted)', fontSize:'.8rem', fontWeight:700, letterSpacing:'.08em', whiteSpace:'nowrap' }}>
-            FILTER BY CLASS
+            FILTRAR POR CLASE
           </label>
           <select
             value={selectedCourse}
             onChange={e => setSelectedCourse(e.target.value)}
             style={{ flex:1, minWidth:200 }}
           >
-            <option value="">— All cards (1–{availableIds.length}) —</option>
+            <option value="">— Todas las tarjetas (1–{availableIds.length}) —</option>
             {courses.map(c => (
               <option key={c.id} value={c.id}>{c.name}</option>
             ))}
           </select>
           {selectedCourse && students.length === 0 && !loading && (
             <span style={{ color:'var(--danger)', fontSize:'.8rem' }}>
-              No students in this class yet
+              No hay alumnos en esta clase para el año actual. Selecciona otra clase o muestra todas las tarjetas.
             </span>
           )}
         </div>
@@ -216,7 +216,7 @@ export default function CardGeneratorPage() {
           fontSize:'.82rem', color:'var(--muted)', lineHeight:1.7
         }}>
           <strong style={{ color:'var(--accent)' }}>A = top · B = right · C = bottom · D = left</strong>
-          {' '}— Hold card up to the phone camera. Rotate so your chosen answer points toward the top of the screen.
+          {' '}— Usar camara del telefono. Rotar para que la respuesta esté arriba.
         </div>
 
         {/* Card grid */}

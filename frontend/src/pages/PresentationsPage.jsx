@@ -247,7 +247,7 @@ export default function PresentationsPage() {
                 <button className="btn btn-primary btn-sm" onClick={() => setSessionModal(p)}>
                   <Play size={12}/> Ejecutar
                 </button>
-                <button className="btn btn-ghost btn-sm" onClick={() => setModal(p)}>Edit</button>
+                <button className="btn btn-ghost btn-sm" onClick={() => setModal(p)}>Editar</button>
                 <button className="btn btn-danger btn-sm" onClick={() => deletePresentation(p.id)}>
                   <Trash2 size={12}/>
                 </button>
