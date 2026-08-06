@@ -26,7 +26,7 @@ import SlideRenderer from '../components/SlideRenderer'
 function cornersToAnswer(corners, rotation) {
   // If detector provided rotation, use it directly
   if (rotation !== undefined) {
-    return ['A', 'B', 'C', 'D'][rotation % 4]
+    return ['A', 'D', 'C', 'B'][rotation % 4]
   }
 
   // Fallback: find which edge is highest (lowest y on screen)
