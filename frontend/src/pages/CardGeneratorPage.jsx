@@ -78,7 +78,8 @@ function triggerPrint(svgElements, title) {
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { background: white; font-family: Arial, sans-serif; }
-    .grid { display: flex; flex-wrap: wrap; gap: 10px; padding: 16px; }
+    .grid { display: flex; flex-wrap: wrap; gap: 16px; padding: 16px; justify-content: flex-start; }
+    .card-wrap svg { width: 340px !important; height: 340px !important; }
     .card-wrap { page-break-inside: avoid; display: flex; flex-direction: column; align-items: center; gap: 3px; }
     .hint { font-size: 8px; color: #888; text-align: center; }
     @media print { .grid { gap: 6px; padding: 8px; } }
@@ -225,7 +226,7 @@ export default function CardGeneratorPage() {
         ) : (
           <div ref={printRef} style={{
             display:'grid',
-            gridTemplateColumns:'repeat(auto-fill, minmax(220px, 1fr))',
+            gridTemplateColumns:'repeat(auto-fill, minmax(340px, 1fr))',
             gap:'1.25rem'
           }}>
             {cardsToShow.map(({ id, name, rut }) => (
@@ -234,7 +235,7 @@ export default function CardGeneratorPage() {
                 padding:'.75rem', background:'var(--surface)',
                 border:'1px solid var(--border)', borderRadius:8
               }}>
-                <Card id={id} studentName={name} rut={rut} cardSize={190}/>
+                <Card id={id} studentName={name} rut={rut} cardSize={360}/>
                 <div style={{ textAlign:'center' }}>
                   <div style={{ fontSize:'.75rem', color:'var(--muted)', fontFamily:'var(--mono)' }}>
                     Card #{id}
