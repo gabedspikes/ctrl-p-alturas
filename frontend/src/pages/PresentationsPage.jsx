@@ -34,12 +34,11 @@ function PresentationModal({ onClose, onSave, initial }) {
     e.preventDefault()
     const assignment = assignments.find(a => a.id === teacherCourseId)
 
-    const payload = {
+  const payload = {
       title,
       teacher_course_id: teacherCourseId || null,
       course_id:  assignment?.course_id  || null,
       subject_id: assignment?.subject_id || null,
-      subject:    assignment?.subjects?.name || null,
       teacher_id: user.id,
     }
 
@@ -167,10 +166,10 @@ function StartSessionModal({ presentation, onClose }) {
           Launch <strong style={{ color:'var(--text)' }}>{presentation.title}</strong> as a live session.
           Los estudiantes responderán usando sus tarjetas impresas.
         </p>
-        {presentation.subject && (
+        {presentation.subjects?.name && (
           <div style={{ display:'flex', gap:'.4rem', marginBottom:'1.25rem' }}>
-            <span className="badge badge-blue">{presentation.course_name || 'Class'}</span>
-            <span className="badge badge-accent">{presentation.subject}</span>
+            <span className="badge badge-blue">{presentation.courses?.name || 'Class'}</span>
+            <span className="badge badge-accent">{presentation.subjects.name}</span>
           </div>
         )}
         <div className="modal-footer">
@@ -196,7 +195,7 @@ export default function PresentationsPage() {
   async function load() {
     const { data } = await supabase
       .from('presentations')
-      .select('*, courses(name)')
+      .select('*, courses(name), subjects(name)')
       .order('created_at', { ascending: false })
     setPresentations(data || [])
   }
@@ -236,7 +235,7 @@ export default function PresentationsPage() {
                 <h3>{p.title}</h3>
                 <div style={{ display:'flex', gap:'.35rem', marginTop:'.5rem', flexWrap:'wrap' }}>
                   <span className="badge badge-blue">{p.courses?.name || 'No class'}</span>
-                  {p.subject && <span className="badge badge-accent">{p.subject}</span>}
+                  {p.subjects?.name && <span className="badge badge-accent">{p.subjects.name}</span>}
                 </div>
               </div>
               <div style={{ display:'flex', gap:'.5rem', marginTop:'auto', flexWrap:'wrap' }}>

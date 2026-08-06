@@ -175,7 +175,7 @@ export default function SessionPage() {
           {session.status === 'active' && (
             <>
               <button className="btn btn-ghost btn-sm" onClick={() => setShowQR(true)}>
-                <Smartphone size={13}/> Open on Phone
+                <Smartphone size={13}/> Abrir en Telefono
               </button>
               <button className="btn btn-danger btn-sm" onClick={finishSession}>Finish</button>
             </>
@@ -267,24 +267,25 @@ export default function SessionPage() {
             </h3>
             <div className="student-list">
               {students.map(st => {
-                const resp = slideResponses.find(r => r.student_id === st.id)
-                return (
-                  <div key={st.id} className="student-row">
-                    <div style={{ display:'flex', alignItems:'center', gap:'.5rem' }}>
-                      <span className="badge badge-accent" style={{ fontSize:'.65rem' }}>#{st.card_id}</span>
-                      <span style={{ fontSize:'.8rem' }}>{st.name}</span>
-                    </div>
-                    {resp
-                      ? <div style={{ display:'flex', alignItems:'center', gap:'.4rem' }}>
-                          <span className={`answer-pill pill-${resp.answer}`}>{resp.answer}</span>
-                          {resp.is_correct === true  && <CheckCircle size={14} color="var(--success)"/>}
-                          {resp.is_correct === false && <XCircle size={14} color="var(--danger)"/>}
-                        </div>
-                      : <span style={{ color:'var(--muted)', fontSize:'.75rem' }}>waiting…</span>
-                    }
-                  </div>
-                )
-              })}
+          const resp = responses.find(r => r.student_id === st.id && r.slide_id === currentSlide?.id)
+          const answered = !!resp
+          return (
+            <div key={st.id} className="student-row">
+              <span>#{st.card_id} {st.name}</span>
+              <span
+                className="answer-badge"
+                style={{
+                  background: answered ? 'var(--success)' : 'transparent',
+                  color: answered ? '#0d0d0f' : 'var(--muted)',
+                  border: answered ? 'none' : '1px solid var(--border)',
+                }}
+                title={answered ? 'Respondió' : 'Pendiente'}
+              >
+                {answered ? '✓' : '·'}
+              </span>
+            </div>
+          )
+        })}
             </div>
           </div>
 
