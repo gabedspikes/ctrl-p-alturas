@@ -194,17 +194,33 @@ function rotate5x5(bits, times) {
   return b
 }
 
-// ── Match against dictionary — returns {id, rotation} ────
+// ── Match against dictionary — returns {id, rotation} or null ────
+// Rejects ambiguous reads: only accepts a match that is clearly ONE pattern.
+//   ACCEPT_MAX  — best match must differ by at most this many cells (read quality)
+//   MIN_MARGIN  — the runner-up must be at least this much worse (no ambiguity)
+// With the 40-pattern dictionary the correct pattern sits at distance 0 and the
+// next candidate at 7, so these thresholds reject bad reads without losing good ones.
+const ACCEPT_MAX = 3
+const MIN_MARGIN = 3
 function matchDict(inner) {
-  let bestId = -1, bestDist = 5, bestRot = 0
+  let bestId = -1, bestDist = 99, bestRot = 0
+  let secondDist = 99
   for (let rot = 0; rot < 4; rot++) {
     const rotated = rotate5x5(inner, rot)
     for (const [id, pattern] of Object.entries(MARKER_DICT)) {
       let dist = 0
       for (let i = 0; i < 25; i++) if (rotated[i] !== pattern[i]) dist++
-      if (dist < bestDist) { bestDist = dist; bestId = parseInt(id); bestRot = rot }
+      if (dist < bestDist) {
+        secondDist = bestDist
+        bestDist = dist; bestId = parseInt(id); bestRot = rot
+      } else if (dist < secondDist) {
+        secondDist = dist
+      }
     }
   }
+  // Quality gate: reject if the read is poor OR too close to a second candidate.
+  if (bestDist > ACCEPT_MAX) return null
+  if (secondDist - bestDist < MIN_MARGIN) return null
   return { id: bestId, rotation: bestRot }
 }
 
@@ -233,12 +249,12 @@ export class ArucoDetector {
       const inner = validateAndExtract(bits)
       if (!inner) continue
 
-      // Match against dictionary
-      const { id, rotation } = matchDict(inner)
-      if (id < 0 || seen.has(id)) continue
-      seen.add(id)
+      // Match against dictionary (null = read rejected as too uncertain)
+      const match = matchDict(inner)
+      if (!match || seen.has(match.id)) continue
+      seen.add(match.id)
 
-      markers.push({ id, rotation, corners })
+      markers.push({ id: match.id, rotation: match.rotation, corners })
     }
 
     return markers
