@@ -92,6 +92,7 @@ export default function ScanPage() {
   const [error, setError]           = useState('')
   const [camReady, setCamReady]     = useState(false)
   const [currentSlideId, setCurrentSlideId] = useState(slideId)
+  const [sessionEnded, setSessionEnded] = useState(false)
 
   const COOLDOWN_MS = 2000
 
@@ -148,13 +149,13 @@ export default function ScanPage() {
         event: 'UPDATE', schema: 'public', table: 'sessions',
         filter: `id=eq.${sessionId}`
       }, async payload => {
-        // If session finished, stop camera and redirect
+        // If session finished, stop camera and show end screen
         if (payload.new.status === 'finished') {
           if (videoRef.current?.srcObject) {
             videoRef.current.srcObject.getTracks().forEach(t => t.stop())
           }
           if (rafRef.current) cancelAnimationFrame(rafRef.current)
-          navigate('/')
+          setSessionEnded(true)
           return
         }
         const newSlideId = payload.new.current_slide_id
@@ -349,6 +350,16 @@ export default function ScanPage() {
           Make sure you opened this page over HTTP (not HTTPS) and allowed camera permissions.
         </p>
       </div>
+    </div>
+  )
+  if (sessionEnded) return (
+    <div style={styles.loadingScreen}>
+      <div style={{ fontSize: '2.5rem', marginBottom: '1rem' }}>✓</div>
+      <h2 style={{ color: '#2ed573', marginBottom: '.5rem' }}>Sesión finalizada</h2>
+      <p style={{ color: '#888', fontSize: '.9rem', textAlign: 'center', maxWidth: 280 }}>
+        El profesor cerró la sesión. Los resultados se muestran en el computador.
+        Ya puedes cerrar esta pestaña.
+      </p>
     </div>
   )
 

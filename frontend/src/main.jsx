@@ -50,7 +50,7 @@ function Layout({ children }) {
             onClick={() => setTheme(t => t === 'dark' ? 'light' : 'dark')}
             title="Cambiar modo Oscuro/Modo Claro"
             style={{ fontSize:'1rem', padding:'.3rem .5rem' }}>
-            {theme === 'dark' ? '☀️' : '🌙'}
+            {theme === 'dark' ? 'LM' : 'DM'}
           </button>
           <span style={{ fontSize:'.75rem', color:'var(--muted)', maxWidth:180,
             overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>

@@ -31,6 +31,8 @@ export default function SlideRenderer({
   height = 405,
   showCorrect = false,
   compact = false,
+  tally = null,        // { A:n, B:n, C:n, D:n } or null to hide
+  totalStudents = 0,   // denominator for the percentage
 }) {
   if (!slide) return null
 
@@ -173,6 +175,27 @@ export default function SlideRenderer({
                 }}>
                   {text || (compact ? '' : `Answer ${letter}`)}
                 </span>
+                {/* Live percentage for this option (session view only) */}
+                {tally && (
+                  <div style={{
+                    marginLeft: 'auto',
+                    flexShrink: 0,
+                    fontFamily: "'JetBrains Mono', monospace",
+                    fontSize: compact ? 10 : Math.max(12, 15*scale),
+                    fontWeight: 700,
+                    color: col.border,
+                    minWidth: compact ? 34 : 52,
+                    textAlign: 'right',
+                  }}>
+                    {totalStudents ? Math.round((tally[letter] || 0) / totalStudents * 100) : 0}%
+                    <span style={{
+                      fontSize: compact ? 8 : Math.max(9, 11*scale),
+                      color: mutedColor, marginLeft: 3, fontWeight: 400,
+                    }}>
+                      ({tally[letter] || 0})
+                    </span>
+                  </div>
+                )}
                 {/* Correct checkmark */}
                 {isCorrect && !compact && (
                   <span style={{ marginLeft: 'auto', color: col.border, fontSize: 16, fontWeight: 800 }}>✓</span>

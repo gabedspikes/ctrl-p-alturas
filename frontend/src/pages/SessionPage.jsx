@@ -47,6 +47,7 @@ export default function SessionPage() {
   const [responses, setResponses] = useState([])
   const [currentIdx, setCurrentIdx] = useState(0)
   const [showQR, setShowQR]       = useState(false)
+  const [showStats, setShowStats] = useState(true)  // percentage overlay, per session
 
   useEffect(() => {
     async function load() {
@@ -124,28 +125,13 @@ export default function SessionPage() {
   }
 
   async function finishSession() {
-    if (!confirm('Mark this session as finished?')) return
+    if (!confirm('¿Finalizar la sesión y mostrar los resultados?')) return
     await supabase.from('sessions')
       .update({ status: 'finished', finished_at: new Date().toISOString() })
       .eq('id', sessionId)
-    navigate('/')
+    setSession(prev => ({ ...prev, status: 'finished' }))
   }
 
-  async function simulateScan(answer) {
-    const slide = slides[currentIdx]
-    if (!slide) return
-    const unresponded = students.filter(st =>
-      !responses.find(r => r.student_id === st.id && r.slide_id === slide.id)
-    )
-    if (unresponded.length === 0) return alert('All students already answered.')
-    const student = unresponded[Math.floor(Math.random() * unresponded.length)]
-    const is_correct = slide.correct_answer ? answer === slide.correct_answer : null
-    // No manual re-fetch: the realtime INSERT subscription appends the new row.
-    await supabase.from('responses').insert({
-      session_id: sessionId, slide_id: slide.id,
-      student_id: student.id, answer, is_correct
-    })
-  }
 
   if (!session) return <div style={{ padding:'2rem', color:'var(--muted)' }}>Loading session…</div>
 
@@ -172,13 +158,17 @@ export default function SessionPage() {
           {session.status === 'active' ? '● LIVE' : '■ FINISHED'}
         </span>
         <div style={{ marginLeft:'auto', display:'flex', gap:'.5rem' }}>
-          {session.status === 'active' && (
+          {session.status === 'active' ? (
             <>
               <button className="btn btn-ghost btn-sm" onClick={() => setShowQR(true)}>
                 <Smartphone size={13}/> Abrir en Telefono
               </button>
               <button className="btn btn-danger btn-sm" onClick={finishSession}>Finish</button>
             </>
+          ) : (
+            <button className="btn btn-primary btn-sm" onClick={() => navigate('/presentations')}>
+              Finalizar y volver a Tests
+            </button>
           )}
         </div>
       </div>
@@ -186,8 +176,28 @@ export default function SessionPage() {
       <div className="session-layout">
         {/* Left: slide + controls */}
         <div style={{ display:'flex', flexDirection:'column', gap:'1rem' }}>
-          <div style={{ border:'1px solid var(--border)', borderRadius:'var(--radius)', overflow:'hidden' }}>
-            <SlideRenderer slide={slides[currentIdx]} width={720} height={405} showCorrect={false}/>
+          <div style={{ border:'1px solid var(--border)', borderRadius:'var(--radius)', overflow:'hidden', position:'relative' }}>
+            <SlideRenderer
+              slide={slides[currentIdx]}
+              width={720}
+              height={405}
+              showCorrect={session.status === 'finished'}
+              tally={showStats ? tally : null}
+              totalStudents={totalStudents}
+            />
+            <button
+              onClick={() => setShowStats(v => !v)}
+              title={showStats ? 'Ocultar porcentajes' : 'Mostrar porcentajes'}
+              style={{
+                position:'absolute', top:8, right:8, zIndex:2,
+                background:'rgba(0,0,0,.55)', border:'1px solid rgba(255,255,255,.15)',
+                borderRadius:6, color:'#fff', cursor:'pointer',
+                padding:'.35rem .5rem', fontSize:'.7rem', fontWeight:700,
+                display:'flex', alignItems:'center', gap:'.3rem',
+              }}
+            >
+              {showStats ? '👁 %' : '⃠ %'}
+            </button>
           </div>
 
           <div style={{ display:'flex', alignItems:'center', gap:'1rem', justifyContent:'center' }}>
@@ -201,63 +211,7 @@ export default function SessionPage() {
               <ChevronRight size={16}/>
             </button>
           </div>
-
-          {/* Simulate scan — testing only */}
-          <div className="card">
-            <h3 style={{ fontSize:'.75rem', letterSpacing:'.1em', color:'var(--muted)', marginBottom:'.6rem' }}>
-              SIMULATE SCAN (testing only)
-            </h3>
-            <div style={{ display:'flex', gap:'.5rem' }}>
-              {['A','B','C','D'].map(l => (
-                <button key={l} className="btn btn-ghost" style={{ flex:1, borderColor:ANS_COLORS[l], color:ANS_COLORS[l] }}
-                  onClick={() => simulateScan(l)}>{l}</button>
-              ))}
-            </div>
-            <p style={{ fontSize:'.7rem', color:'var(--muted)', marginTop:'.5rem' }}>
-              Assigns answer to a random unresponded student.
-            </p>
           </div>
-
-          {/* Answer bars */}
-          {currentSlide && (
-            <div className="card">
-              <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'.5rem' }}>
-                <h3 style={{ fontSize:'.75rem', letterSpacing:'.1em', color:'var(--muted)' }}>RESPONSES</h3>
-                <span style={{ fontFamily:'var(--mono)', fontSize:'.8rem', color:'var(--muted)' }}>
-                  {slideResponses.length} / {totalStudents}
-                </span>
-              </div>
-              <div className="answer-bars">
-                {['A','B','C','D'].map(l => {
-                  const count = tally[l]
-                  const pct = totalStudents ? Math.round(count / totalStudents * 100) : 0
-                  const isCorrect = currentSlide.correct_answer === l
-                  const answerText = currentSlide[`answer_${l.toLowerCase()}`]
-                  return (
-                    <div key={l} className="answer-bar-row">
-                      <span className={`answer-pill pill-${l}`}>{l}</span>
-                      <div style={{flex:1,display:'flex',flexDirection:'column',gap:'2px'}}>
-                        {answerText && (
-                          <span style={{fontSize:'.72rem',color:'var(--text)',lineHeight:1.2}}>{answerText}</span>
-                        )}
-                        <div className="bar-track">
-                          <div className="bar-fill" style={{
-                            width: `${pct}%`,
-                            background: isCorrect ? BAR_COLORS[l] : `${BAR_COLORS[l]}66`
-                          }}/>
-                        </div>
-                      </div>
-                      <span style={{ fontFamily:'var(--mono)', fontSize:'.75rem', color:'var(--muted)', minWidth:'2.5rem', textAlign:'right' }}>
-                        {count} ({pct}%)
-                      </span>
-                      {isCorrect && <CheckCircle size={14} color="var(--success)"/>}
-                    </div>
-                  )
-                })}
-              </div>
-            </div>
-          )}
-        </div>
 
         {/* Right: student list */}
         <div style={{ display:'flex', flexDirection:'column', gap:'1rem' }}>
@@ -289,7 +243,7 @@ export default function SessionPage() {
             </div>
           </div>
 
-          {slides.length > 1 && (
+          {session.status === 'finished' && slides.length > 1 && (
             <div className="card">
               <h3 style={{ fontSize:'.75rem', letterSpacing:'.1em', color:'var(--muted)', marginBottom:'.75rem' }}>
                 RUNNING SCORES
