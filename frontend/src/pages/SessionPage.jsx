@@ -1,11 +1,8 @@
-import React, { useEffect, useState, useRef } from 'react'
+import React, { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
-import { ChevronLeft, ChevronRight, CheckCircle, XCircle, Smartphone } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Smartphone } from 'lucide-react'
 import SlideRenderer from '../components/SlideRenderer'
-
-const ANS_COLORS = { A:'#e8ff47', B:'#47c8ff', C:'#ffa500', D:'#ff4757' }
-const BAR_COLORS = { A:'#e8ff47', B:'#47c8ff', C:'#ffa500', D:'#ff4757' }
 
 // ── QR Code modal ────────────────────────────────────────
 function ScanQRModal({ sessionId, onClose }) {
@@ -41,17 +38,17 @@ export default function SessionPage() {
   const { id: sessionId } = useParams()
   const navigate = useNavigate()
 
-  const [session, setSession]     = useState(null)
-  const [slides, setSlides]       = useState([])
-  const [students, setStudents]   = useState([])
-  const [responses, setResponses] = useState([])
+  const [session, setSession]       = useState(null)
+  const [slides, setSlides]         = useState([])
+  const [students, setStudents]     = useState([])
+  const [responses, setResponses]   = useState([])
   const [currentIdx, setCurrentIdx] = useState(0)
-  const [showQR, setShowQR]       = useState(false)
-  const [showStats, setShowStats] = useState(true)  // percentage overlay, per session
+  const [showQR, setShowQR]         = useState(false)
+  const [showStats, setShowStats]   = useState(true)  // percentage overlay, per session
 
   useEffect(() => {
     async function load() {
-     const { data: sess, error: sessErr } = await supabase
+      const { data: sess, error: sessErr } = await supabase
         .from('sessions')
         .select('*, presentations(title, subject_id), courses(id,name), generations(id, year)')
         .eq('id', sessionId).single()
@@ -73,7 +70,7 @@ export default function SessionPage() {
       setSlides(sl || [])
 
       // Students always come from the generation (course fallback removed)
-      let students = []
+      let studs = []
       if (sess.generation_id) {
         const { data: genStu } = await supabase
           .from('generation_students')
@@ -81,14 +78,14 @@ export default function SessionPage() {
           .eq('generation_id', sess.generation_id)
           .eq('active', true)
           .order('card_id')
-        students = (genStu || []).map(gs => ({
+        studs = (genStu || []).map(gs => ({
           id: gs.students.id,
           name: gs.students.name,
           rut: gs.students.rut,
           card_id: gs.card_id,
         }))
       }
-      setStudents(students)
+      setStudents(studs)
 
       const { data: resp } = await supabase
         .from('responses').select('*').eq('session_id', sessionId)
@@ -115,7 +112,6 @@ export default function SessionPage() {
     return () => supabase.removeChannel(channel)
   }, [sessionId])
 
-
   async function goTo(idx) {
     if (idx < 0 || idx >= slides.length) return
     setCurrentIdx(idx)
@@ -132,14 +128,17 @@ export default function SessionPage() {
     setSession(prev => ({ ...prev, status: 'finished' }))
   }
 
-
   if (!session) return <div style={{ padding:'2rem', color:'var(--muted)' }}>Loading session…</div>
 
-  const currentSlide    = slides[currentIdx]
-  const slideResponses  = responses.filter(r => r.slide_id === currentSlide?.id)
-  const totalStudents   = students.length
+  const currentSlide  = slides[currentIdx]
+  const totalStudents = students.length
+  const isFinished    = session.status === 'finished'
+
+  // Tally for the current slide (drives the live percentage overlay)
   const tally = { A:0, B:0, C:0, D:0 }
-  slideResponses.forEach(r => { if (tally[r.answer] !== undefined) tally[r.answer]++ })
+  responses.forEach(r => {
+    if (r.slide_id === currentSlide?.id && tally[r.answer] !== undefined) tally[r.answer]++
+  })
 
   return (
     <div style={{ background:'var(--bg)', minHeight:'100vh' }}>
@@ -154,11 +153,11 @@ export default function SessionPage() {
         {session.presentations?.subject_name && (
           <span className="badge badge-accent">{session.presentations.subject_name}</span>
         )}
-        <span className={`badge ${session.status === 'active' ? 'badge-success' : 'badge-danger'}`}>
-          {session.status === 'active' ? '● LIVE' : '■ FINISHED'}
+        <span className={`badge ${isFinished ? 'badge-danger' : 'badge-success'}`}>
+          {isFinished ? '■ FINISHED' : '● LIVE'}
         </span>
         <div style={{ marginLeft:'auto', display:'flex', gap:'.5rem' }}>
-          {session.status === 'active' ? (
+          {!isFinished ? (
             <>
               <button className="btn btn-ghost btn-sm" onClick={() => setShowQR(true)}>
                 <Smartphone size={13}/> Abrir en Telefono
@@ -174,14 +173,14 @@ export default function SessionPage() {
       </div>
 
       <div className="session-layout">
-        {/* Left: slide + controls */}
+        {/* Left: slide + controls + results */}
         <div style={{ display:'flex', flexDirection:'column', gap:'1rem' }}>
           <div style={{ border:'1px solid var(--border)', borderRadius:'var(--radius)', overflow:'hidden', position:'relative' }}>
             <SlideRenderer
-              slide={slides[currentIdx]}
+              slide={currentSlide}
               width={720}
               height={405}
-              showCorrect={session.status === 'finished'}
+              showCorrect={isFinished}
               tally={showStats ? tally : null}
               totalStudents={totalStudents}
             />
@@ -196,7 +195,7 @@ export default function SessionPage() {
                 display:'flex', alignItems:'center', gap:'.3rem',
               }}
             >
-              {showStats ? '👁 %' : '⃠ %'}
+              {showStats ? 'Ocultar %' : 'Mostrar %'}
             </button>
           </div>
 
@@ -211,9 +210,60 @@ export default function SessionPage() {
               <ChevronRight size={16}/>
             </button>
           </div>
-          </div>
 
-        {/* Right: student list */}
+          {/* Results table — only after the session is finished */}
+          {isFinished && (() => {
+            const rows = [...students]
+              .sort((a, b) => a.card_id - b.card_id)
+              .map(st => ({
+                card_id:  st.card_id,
+                name:     st.name,
+                correct:  responses.filter(r => r.student_id === st.id && r.is_correct).length,
+                answered: responses.filter(r => r.student_id === st.id).length,
+              }))
+            const mid = Math.ceil(rows.length / 2)
+            const halves = [rows.slice(0, mid), rows.slice(mid)]
+
+            const renderTable = (half, key) => (
+              <table key={key} style={{ flex: 1, borderCollapse: 'collapse', fontSize: '.8rem' }}>
+                <thead>
+                  <tr style={{ color: 'var(--muted)', textAlign: 'left' }}>
+                    <th style={{ padding: '.4rem .5rem', fontWeight: 700, width: 44 }}>#</th>
+                    <th style={{ padding: '.4rem .5rem', fontWeight: 700 }}>Nombre</th>
+                    <th style={{ padding: '.4rem .5rem', fontWeight: 700, width: 70, textAlign: 'right' }}>Aciertos</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {half.map(r => (
+                    <tr key={r.card_id} style={{ borderTop: '1px solid var(--border)' }}>
+                      <td style={{ padding: '.4rem .5rem', fontFamily: 'var(--mono)', color: 'var(--muted)' }}>
+                        {r.card_id}
+                      </td>
+                      <td style={{ padding: '.4rem .5rem' }}>{r.name}</td>
+                      <td style={{ padding: '.4rem .5rem', fontFamily: 'var(--mono)', color: 'var(--accent)', textAlign: 'right' }}>
+                        {r.correct}/{r.answered}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )
+
+            return (
+              <div className="card">
+                <h3 style={{ fontSize: '.75rem', letterSpacing: '.1em', color: 'var(--muted)', marginBottom: '.75rem' }}>
+                  RESULTADOS
+                </h3>
+                <div style={{ display: 'flex', gap: '1.5rem', alignItems: 'flex-start' }}>
+                  {renderTable(halves[0], 'left')}
+                  {halves[1].length > 0 && renderTable(halves[1], 'right')}
+                </div>
+              </div>
+            )
+          })()}
+        </div>
+
+        {/* Right: student answered/pending list */}
         <div style={{ display:'flex', flexDirection:'column', gap:'1rem' }}>
           <div className="card" style={{ flex:1 }}>
             <h3 style={{ fontSize:'.75rem', letterSpacing:'.1em', color:'var(--muted)', marginBottom:'.75rem' }}>
@@ -221,49 +271,26 @@ export default function SessionPage() {
             </h3>
             <div className="student-list">
               {students.map(st => {
-          const resp = responses.find(r => r.student_id === st.id && r.slide_id === currentSlide?.id)
-          const answered = !!resp
-          return (
-            <div key={st.id} className="student-row">
-              <span>#{st.card_id} {st.name}</span>
-              <span
-                className="answer-badge"
-                style={{
-                  background: answered ? 'var(--success)' : 'transparent',
-                  color: answered ? '#0d0d0f' : 'var(--muted)',
-                  border: answered ? 'none' : '1px solid var(--border)',
-                }}
-                title={answered ? 'Respondió' : 'Pendiente'}
-              >
-                {answered ? '✓' : '·'}
-              </span>
-            </div>
-          )
-        })}
+                const answered = responses.some(r => r.student_id === st.id && r.slide_id === currentSlide?.id)
+                return (
+                  <div key={st.id} className="student-row">
+                    <span>#{st.card_id} {st.name}</span>
+                    <span
+                      className="answer-badge"
+                      style={{
+                        background: answered ? 'var(--success)' : 'transparent',
+                        color: answered ? '#0d0d0f' : 'var(--muted)',
+                        border: answered ? 'none' : '1px solid var(--border)',
+                      }}
+                      title={answered ? 'Respondió' : 'Pendiente'}
+                    >
+                      {answered ? '✓' : '·'}
+                    </span>
+                  </div>
+                )
+              })}
             </div>
           </div>
-
-          {session.status === 'finished' && slides.length > 1 && (
-            <div className="card">
-              <h3 style={{ fontSize:'.75rem', letterSpacing:'.1em', color:'var(--muted)', marginBottom:'.75rem' }}>
-                RUNNING SCORES
-              </h3>
-              <div className="student-list">
-                {students.map(st => {
-                  const correct  = responses.filter(r => r.student_id === st.id && r.is_correct).length
-                  const answered = responses.filter(r => r.student_id === st.id).length
-                  return (
-                    <div key={st.id} className="student-row">
-                      <span style={{ fontSize:'.8rem' }}>{st.name}</span>
-                      <span style={{ fontFamily:'var(--mono)', fontSize:'.8rem', color:'var(--accent)' }}>
-                        {correct}/{answered}
-                      </span>
-                    </div>
-                  )
-                })}
-              </div>
-            </div>
-          )}
         </div>
       </div>
 
