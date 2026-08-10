@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useState, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { ChevronLeft, ChevronRight, Smartphone } from 'lucide-react'
@@ -44,7 +44,24 @@ export default function SessionPage() {
   const [responses, setResponses]   = useState([])
   const [currentIdx, setCurrentIdx] = useState(0)
   const [showQR, setShowQR]         = useState(false)
-  const [showStats, setShowStats]   = useState(true)  // percentage overlay, per session
+  const [showStats, setShowStats]   = useState(true)   // live % overlay, per session
+  const [showResults, setShowResults] = useState(false) // final results reveal, hidden by default
+
+  // Measure the slide stage to keep the slide big but proportional (16:9)
+  const stageRef = useRef(null)
+  const [stageWidth, setStageWidth] = useState(720)
+
+  useEffect(() => {
+    if (!stageRef.current) return
+    const el = stageRef.current
+    const ro = new ResizeObserver(entries => {
+      for (const entry of entries) {
+        setStageWidth(Math.round(entry.contentRect.width))
+      }
+    })
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
 
   useEffect(() => {
     async function load() {
@@ -121,7 +138,7 @@ export default function SessionPage() {
   }
 
   async function finishSession() {
-    if (!confirm('¿Finalizar la sesión y mostrar los resultados?')) return
+    if (!confirm('¿Finalizar la sesión? Podrás revelar los resultados después.')) return
     await supabase.from('sessions')
       .update({ status: 'finished', finished_at: new Date().toISOString() })
       .eq('id', sessionId)
@@ -133,12 +150,15 @@ export default function SessionPage() {
   const currentSlide  = slides[currentIdx]
   const totalStudents = students.length
   const isFinished    = session.status === 'finished'
+  const revealCorrect = isFinished && showResults
 
   // Tally for the current slide (drives the live percentage overlay)
   const tally = { A:0, B:0, C:0, D:0 }
   responses.forEach(r => {
     if (r.slide_id === currentSlide?.id && tally[r.answer] !== undefined) tally[r.answer]++
   })
+
+  const stageHeight = Math.round(stageWidth * 9 / 16)
 
   return (
     <div style={{ background:'var(--bg)', minHeight:'100vh' }}>
@@ -173,125 +193,121 @@ export default function SessionPage() {
       </div>
 
       <div className="session-layout">
-        {/* Left: slide + controls + results */}
-        <div style={{ display:'flex', flexDirection:'column', gap:'1rem' }}>
-          <div style={{ border:'1px solid var(--border)', borderRadius:'var(--radius)', overflow:'hidden', position:'relative' }}>
-            <SlideRenderer
-              slide={currentSlide}
-              width={720}
-              height={405}
-              showCorrect={isFinished}
-              tally={showStats ? tally : null}
-              totalStudents={totalStudents}
-            />
-            <button
-              onClick={() => setShowStats(v => !v)}
-              title={showStats ? 'Ocultar porcentajes' : 'Mostrar porcentajes'}
-              style={{
-                position:'absolute', top:8, right:8, zIndex:2,
-                background:'rgba(0,0,0,.55)', border:'1px solid rgba(255,255,255,.15)',
-                borderRadius:6, color:'#fff', cursor:'pointer',
-                padding:'.35rem .5rem', fontSize:'.7rem', fontWeight:700,
-                display:'flex', alignItems:'center', gap:'.3rem',
-              }}
-            >
-              {showStats ? 'Ocultar %' : 'Mostrar %'}
-            </button>
+        {/* Slide stage — grows to fill width, stays 16:9 */}
+        <div
+          ref={stageRef}
+          style={{ border:'1px solid var(--border)', borderRadius:'var(--radius)', overflow:'hidden', position:'relative', width:'100%' }}
+        >
+          <SlideRenderer
+            slide={currentSlide}
+            width={stageWidth}
+            height={stageHeight}
+            showCorrect={revealCorrect}
+            tally={showStats ? tally : null}
+            totalStudents={totalStudents}
+          />
+          <button
+            onClick={() => setShowStats(v => !v)}
+            title={showStats ? 'Ocultar porcentajes' : 'Mostrar porcentajes'}
+            style={{
+              position:'absolute', top:8, right:8, zIndex:2,
+              background:'rgba(0,0,0,.55)', border:'1px solid rgba(255,255,255,.15)',
+              borderRadius:6, color:'#fff', cursor:'pointer',
+              padding:'.35rem .5rem', fontSize:'.7rem', fontWeight:700,
+              display:'flex', alignItems:'center', gap:'.3rem',
+            }}
+          >
+            {showStats ? 'Ocultar %' : 'Mostrar %'}
+          </button>
+        </div>
+
+        {/* Navigation */}
+        <div style={{ display:'flex', alignItems:'center', gap:'1rem', justifyContent:'center' }}>
+          <button className="btn btn-ghost" onClick={() => goTo(currentIdx - 1)} disabled={currentIdx === 0}>
+            <ChevronLeft size={16}/>
+          </button>
+          <span style={{ fontFamily:'var(--mono)', fontSize:'.85rem', color:'var(--muted)' }}>
+            Slide {currentIdx + 1} / {slides.length}
+          </span>
+          <button className="btn btn-ghost" onClick={() => goTo(currentIdx + 1)} disabled={currentIdx === slides.length - 1}>
+            <ChevronRight size={16}/>
+          </button>
+        </div>
+
+        {/* Student grid — 4 fixed columns, whole cell highlights when read */}
+        <div className="card">
+          <h3 style={{ fontSize:'.75rem', letterSpacing:'.1em', color:'var(--muted)', marginBottom:'.5rem' }}>
+            ALUMNOS ({totalStudents})
+          </h3>
+          <div className="student-grid">
+            {students.map(st => {
+              const answered = responses.some(r => r.student_id === st.id && r.slide_id === currentSlide?.id)
+              return (
+                <div key={st.id} className={`student-cell${answered ? ' answered' : ''}`}>
+                  <span className="card-no">#{st.card_id}</span>
+                  <span className="student-name">{st.name}</span>
+                </div>
+              )
+            })}
           </div>
+        </div>
 
-          <div style={{ display:'flex', alignItems:'center', gap:'1rem', justifyContent:'center' }}>
-            <button className="btn btn-ghost" onClick={() => goTo(currentIdx - 1)} disabled={currentIdx === 0}>
-              <ChevronLeft size={16}/>
-            </button>
-            <span style={{ fontFamily:'var(--mono)', fontSize:'.85rem', color:'var(--muted)' }}>
-              Slide {currentIdx + 1} / {slides.length}
-            </span>
-            <button className="btn btn-ghost" onClick={() => goTo(currentIdx + 1)} disabled={currentIdx === slides.length - 1}>
-              <ChevronRight size={16}/>
-            </button>
-          </div>
+        {/* Results — hidden by default, professor decides when to reveal */}
+        {isFinished && (
+          <div className="card">
+            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom: showResults ? '.75rem' : 0 }}>
+              <h3 style={{ fontSize:'.75rem', letterSpacing:'.1em', color:'var(--muted)' }}>RESULTADOS</h3>
+              <button className="btn btn-primary btn-sm" onClick={() => setShowResults(v => !v)}>
+                {showResults ? 'Ocultar resultados' : 'Ver resultados'}
+              </button>
+            </div>
 
-          {/* Results table — only after the session is finished */}
-          {isFinished && (() => {
-            const rows = [...students]
-              .sort((a, b) => a.card_id - b.card_id)
-              .map(st => ({
-                card_id:  st.card_id,
-                name:     st.name,
-                correct:  responses.filter(r => r.student_id === st.id && r.is_correct).length,
-                answered: responses.filter(r => r.student_id === st.id).length,
-              }))
-            const mid = Math.ceil(rows.length / 2)
-            const halves = [rows.slice(0, mid), rows.slice(mid)]
+            {showResults && (() => {
+              const rows = [...students]
+                .sort((a, b) => a.card_id - b.card_id)
+                .map(st => ({
+                  card_id:  st.card_id,
+                  name:     st.name,
+                  correct:  responses.filter(r => r.student_id === st.id && r.is_correct).length,
+                  answered: responses.filter(r => r.student_id === st.id).length,
+                }))
+              const mid = Math.ceil(rows.length / 2)
+              const halves = [rows.slice(0, mid), rows.slice(mid)]
 
-            const renderTable = (half, key) => (
-              <table key={key} style={{ flex: 1, borderCollapse: 'collapse', fontSize: '.8rem' }}>
-                <thead>
-                  <tr style={{ color: 'var(--muted)', textAlign: 'left' }}>
-                    <th style={{ padding: '.4rem .5rem', fontWeight: 700, width: 44 }}>#</th>
-                    <th style={{ padding: '.4rem .5rem', fontWeight: 700 }}>Nombre</th>
-                    <th style={{ padding: '.4rem .5rem', fontWeight: 700, width: 70, textAlign: 'right' }}>Aciertos</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {half.map(r => (
-                    <tr key={r.card_id} style={{ borderTop: '1px solid var(--border)' }}>
-                      <td style={{ padding: '.4rem .5rem', fontFamily: 'var(--mono)', color: 'var(--muted)' }}>
-                        {r.card_id}
-                      </td>
-                      <td style={{ padding: '.4rem .5rem' }}>{r.name}</td>
-                      <td style={{ padding: '.4rem .5rem', fontFamily: 'var(--mono)', color: 'var(--accent)', textAlign: 'right' }}>
-                        {r.correct}/{r.answered}
-                      </td>
+              const renderTable = (half, key) => (
+                <table key={key} style={{ flex: 1, borderCollapse: 'collapse', fontSize: '.8rem' }}>
+                  <thead>
+                    <tr style={{ color: 'var(--muted)', textAlign: 'left' }}>
+                      <th style={{ padding: '.4rem .5rem', fontWeight: 700, width: 44 }}>#</th>
+                      <th style={{ padding: '.4rem .5rem', fontWeight: 700 }}>Nombre</th>
+                      <th style={{ padding: '.4rem .5rem', fontWeight: 700, width: 70, textAlign: 'right' }}>Aciertos</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            )
+                  </thead>
+                  <tbody>
+                    {half.map(r => (
+                      <tr key={r.card_id} style={{ borderTop: '1px solid var(--border)' }}>
+                        <td style={{ padding: '.4rem .5rem', fontFamily: 'var(--mono)', color: 'var(--muted)' }}>
+                          {r.card_id}
+                        </td>
+                        <td style={{ padding: '.4rem .5rem' }}>{r.name}</td>
+                        <td style={{ padding: '.4rem .5rem', fontFamily: 'var(--mono)', color: 'var(--accent)', textAlign: 'right' }}>
+                          {r.correct}/{r.answered}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )
 
-            return (
-              <div className="card">
-                <h3 style={{ fontSize: '.75rem', letterSpacing: '.1em', color: 'var(--muted)', marginBottom: '.75rem' }}>
-                  RESULTADOS
-                </h3>
+              return (
                 <div style={{ display: 'flex', gap: '1.5rem', alignItems: 'flex-start' }}>
                   {renderTable(halves[0], 'left')}
                   {halves[1].length > 0 && renderTable(halves[1], 'right')}
                 </div>
-              </div>
-            )
-          })()}
-        </div>
-
-        {/* Right: student answered/pending list */}
-        <div style={{ display:'flex', flexDirection:'column', gap:'1rem' }}>
-          <div className="card" style={{ flex:1 }}>
-            <h3 style={{ fontSize:'.75rem', letterSpacing:'.1em', color:'var(--muted)', marginBottom:'.75rem' }}>
-              STUDENT RESPONSES
-            </h3>
-            <div className="student-list">
-              {students.map(st => {
-                const answered = responses.some(r => r.student_id === st.id && r.slide_id === currentSlide?.id)
-                return (
-                  <div key={st.id} className="student-row">
-                    <span>#{st.card_id} {st.name}</span>
-                    <span
-                      className="answer-badge"
-                      style={{
-                        background: answered ? 'var(--success)' : 'transparent',
-                        color: answered ? '#0d0d0f' : 'var(--muted)',
-                        border: answered ? 'none' : '1px solid var(--border)',
-                      }}
-                      title={answered ? 'Respondió' : 'Pendiente'}
-                    >
-                      {answered ? '✓' : '·'}
-                    </span>
-                  </div>
-                )
-              })}
-            </div>
+              )
+            })()}
           </div>
-        </div>
+        )}
       </div>
 
       {showQR && <ScanQRModal sessionId={sessionId} onClose={() => setShowQR(false)} />}

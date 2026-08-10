@@ -209,13 +209,43 @@ label { display: block; font-size: .75rem; color: var(--muted);
   letter-spacing: .1em; color: var(--muted); text-transform: uppercase; }
 
 /* ── SESSION VIEW ───────────────────────────────────────── */
+/* Single column: slide on top (grows to fill width, stays 16:9),
+   nav below, student grid below that, results at the bottom. */
 .session-layout {
-  display: grid; grid-template-columns: 1fr 300px;
-  gap: 1.5rem; padding: 1.5rem; min-height: calc(100vh - 57px);
+  display: flex; flex-direction: column; gap: 1.25rem;
+  padding: 1.5rem; min-height: calc(100vh - 57px);
+  max-width: 1400px; margin: 0 auto; width: 100%;
 }
-.student-list { display: flex; flex-direction: column; gap: .4rem; margin-top: .75rem; }
-.student-row {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: .45rem .6rem; border-radius: var(--radius);
-  background: rgba(255,255,255,.03); font-size: .8rem;
+ 
+/* Student grid — 4 fixed columns so up to ~40 students fit without
+   scrolling on a projector. Whole cell (not a small icon) changes color
+   when the card was read, so it's visible from the back of the room. */
+.student-grid {
+  display: grid; grid-template-columns: repeat(4, 1fr);
+  gap: .6rem;
+}
+.student-cell {
+  display: flex; align-items: center; gap: .5rem;
+  padding: .6rem .75rem; border-radius: var(--radius);
+  border: 1.5px solid var(--border);
+  background: rgba(255,255,255,.03);
+  font-size: .85rem;
+  transition: background .2s ease, border-color .2s ease;
+}
+.student-cell .card-no {
+  font-family: var(--mono); font-size: .72rem; color: var(--muted);
+  flex-shrink: 0;
+}
+.student-cell .student-name {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.student-cell.answered {
+  background: rgba(46,213,115,.15);
+  border-color: var(--success);
+}
+.student-cell.answered .card-no {
+  color: var(--success);
+}
+@media (max-width: 640px) {
+  .student-grid { grid-template-columns: repeat(2, 1fr); }
 }
