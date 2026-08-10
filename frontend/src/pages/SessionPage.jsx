@@ -4,9 +4,22 @@ import { supabase } from '../lib/supabase'
 import { ChevronLeft, ChevronRight, Smartphone } from 'lucide-react'
 import SlideRenderer from '../components/SlideRenderer'
 
+import QRCode from 'qrcode'
+
 // ── QR Code modal ────────────────────────────────────────
 function ScanQRModal({ sessionId, onClose }) {
   const scanUrl = `${window.location.origin}/scan/${sessionId}`
+  const canvasRef = useRef(null)
+  const [qrError, setQrError] = useState(false)
+
+  useEffect(() => {
+    if (!canvasRef.current) return
+    QRCode.toCanvas(canvasRef.current, scanUrl, {
+      width: 200,
+      margin: 1,
+      color: { dark: '#0d0d0f', light: '#ffffff' },
+    }).catch(() => setQrError(true))
+  }, [scanUrl])
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
@@ -15,12 +28,21 @@ function ScanQRModal({ sessionId, onClose }) {
         <p style={{ color: 'var(--muted)', fontSize: '.85rem', marginBottom: '1.5rem' }}>
           Escanea este código QR con la cámara de tu teléfono para abrir el escáner.
         </p>
-        <img
-          src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(scanUrl)}`}
-          alt="Scan QR"
-          style={{ width: 200, height: 200, borderRadius: 8, border: '4px solid var(--accent)', marginBottom: '1rem' }}
-        />
-        <p style={{ fontSize: '.75rem', color: 'var(--muted)', marginBottom: '.5rem' }}>Or open this URL manually:</p>
+
+        {!qrError ? (
+          <canvas
+            ref={canvasRef}
+            style={{ borderRadius: 8, border: '4px solid var(--accent)', marginBottom: '1rem' }}
+          />
+        ) : (
+          <p style={{ color: 'var(--danger)', fontSize: '.8rem', marginBottom: '1rem' }}>
+            No se pudo generar el código QR. Usa el link de abajo.
+          </p>
+        )}
+
+        <p style={{ fontSize: '.75rem', color: 'var(--muted)', marginBottom: '.5rem' }}>
+          O abre este link manualmente:
+        </p>
         <code style={{
           display: 'block', background: 'var(--bg)', border: '1px solid var(--border)',
           borderRadius: 6, padding: '.6rem', fontSize: '.75rem',
@@ -38,14 +60,14 @@ export default function SessionPage() {
   const { id: sessionId } = useParams()
   const navigate = useNavigate()
 
-  const [session, setSession]       = useState(null)
-  const [slides, setSlides]         = useState([])
-  const [students, setStudents]     = useState([])
-  const [responses, setResponses]   = useState([])
-  const [currentIdx, setCurrentIdx] = useState(0)
-  const [showQR, setShowQR]         = useState(false)
-  const [showStats, setShowStats]   = useState(true)   // live % overlay, per session
-  const [showResults, setShowResults] = useState(false) // final results reveal, hidden by default
+  const [session, setSession]         = useState(null)
+  const [slides, setSlides]           = useState([])
+  const [students, setStudents]       = useState([])
+  const [responses, setResponses]     = useState([])
+  const [currentIdx, setCurrentIdx]   = useState(0)
+  const [showQR, setShowQR]           = useState(false)
+  const [showStats, setShowStats]     = useState(true)   // live % overlay, per session
+  const [showResults, setShowResults] = useState(false)  // final results reveal, hidden by default
 
   // Measure the slide stage to keep the slide big but proportional (16:9)
   const stageRef = useRef(null)
@@ -160,6 +182,9 @@ export default function SessionPage() {
 
   const stageHeight = Math.round(stageWidth * 9 / 16)
 
+  // Sorted-by-card-id student list, reused by both the sidebar and the results grid
+  const sortedStudents = [...students].sort((a, b) => a.card_id - b.card_id)
+
   return (
     <div style={{ background:'var(--bg)', minHeight:'100vh' }}>
       {/* Top bar */}
@@ -193,121 +218,97 @@ export default function SessionPage() {
       </div>
 
       <div className="session-layout">
-        {/* Slide stage — grows to fill width, stays 16:9 */}
-        <div
-          ref={stageRef}
-          style={{ border:'1px solid var(--border)', borderRadius:'var(--radius)', overflow:'hidden', position:'relative', width:'100%' }}
-        >
-          <SlideRenderer
-            slide={currentSlide}
-            width={stageWidth}
-            height={stageHeight}
-            showCorrect={revealCorrect}
-            tally={showStats ? tally : null}
-            totalStudents={totalStudents}
-          />
-          <button
-            onClick={() => setShowStats(v => !v)}
-            title={showStats ? 'Ocultar porcentajes' : 'Mostrar porcentajes'}
-            style={{
-              position:'absolute', top:8, right:8, zIndex:2,
-              background:'rgba(0,0,0,.55)', border:'1px solid rgba(255,255,255,.15)',
-              borderRadius:6, color:'#fff', cursor:'pointer',
-              padding:'.35rem .5rem', fontSize:'.7rem', fontWeight:700,
-              display:'flex', alignItems:'center', gap:'.3rem',
-            }}
+        {/* Left: slide + controls + optional results */}
+        <div style={{ display:'flex', flexDirection:'column', gap:'.75rem', minWidth:0 }}>
+
+          {/* Slim toolbar above the slide — keeps the canvas itself free of overlays */}
+          <div style={{ display:'flex', justifyContent:'flex-end' }}>
+            <button
+              className="btn btn-ghost btn-sm"
+              onClick={() => setShowStats(v => !v)}
+            >
+              {showStats ? 'Ocultar %' : 'Mostrar %'}
+            </button>
+          </div>
+
+          <div
+            ref={stageRef}
+            style={{ border:'1px solid var(--border)', borderRadius:'var(--radius)', overflow:'hidden', width:'100%' }}
           >
-            {showStats ? 'Ocultar %' : 'Mostrar %'}
-          </button>
-        </div>
-
-        {/* Navigation */}
-        <div style={{ display:'flex', alignItems:'center', gap:'1rem', justifyContent:'center' }}>
-          <button className="btn btn-ghost" onClick={() => goTo(currentIdx - 1)} disabled={currentIdx === 0}>
-            <ChevronLeft size={16}/>
-          </button>
-          <span style={{ fontFamily:'var(--mono)', fontSize:'.85rem', color:'var(--muted)' }}>
-            Slide {currentIdx + 1} / {slides.length}
-          </span>
-          <button className="btn btn-ghost" onClick={() => goTo(currentIdx + 1)} disabled={currentIdx === slides.length - 1}>
-            <ChevronRight size={16}/>
-          </button>
-        </div>
-
-        {/* Student grid — 4 fixed columns, whole cell highlights when read */}
-        <div className="card">
-          <h3 style={{ fontSize:'.75rem', letterSpacing:'.1em', color:'var(--muted)', marginBottom:'.5rem' }}>
-            ALUMNOS ({totalStudents})
-          </h3>
-          <div className="student-grid">
-            {students.map(st => {
-              const answered = responses.some(r => r.student_id === st.id && r.slide_id === currentSlide?.id)
-              return (
-                <div key={st.id} className={`student-cell${answered ? ' answered' : ''}`}>
-                  <span className="card-no">#{st.card_id}</span>
-                  <span className="student-name">{st.name}</span>
-                </div>
-              )
-            })}
+            <SlideRenderer
+              slide={currentSlide}
+              width={stageWidth}
+              height={stageHeight}
+              showCorrect={revealCorrect}
+              tally={showStats ? tally : null}
+              totalStudents={totalStudents}
+            />
           </div>
-        </div>
 
-        {/* Results — hidden by default, professor decides when to reveal */}
-        {isFinished && (
-          <div className="card">
-            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom: showResults ? '.75rem' : 0 }}>
-              <h3 style={{ fontSize:'.75rem', letterSpacing:'.1em', color:'var(--muted)' }}>RESULTADOS</h3>
-              <button className="btn btn-primary btn-sm" onClick={() => setShowResults(v => !v)}>
-                {showResults ? 'Ocultar resultados' : 'Ver resultados'}
-              </button>
+          {/* Navigation */}
+          <div style={{ display:'flex', alignItems:'center', gap:'1rem', justifyContent:'center' }}>
+            <button className="btn btn-ghost" onClick={() => goTo(currentIdx - 1)} disabled={currentIdx === 0}>
+              <ChevronLeft size={16}/>
+            </button>
+            <span style={{ fontFamily:'var(--mono)', fontSize:'.85rem', color:'var(--muted)' }}>
+              Slide {currentIdx + 1} / {slides.length}
+            </span>
+            <button className="btn btn-ghost" onClick={() => goTo(currentIdx + 1)} disabled={currentIdx === slides.length - 1}>
+              <ChevronRight size={16}/>
+            </button>
+          </div>
+
+          {/* Results — hidden by default, professor decides when to reveal.
+              Lives in the space below the canvas, reusing the same card-grid
+              look as the student sidebar. Being optional, a bit of scroll
+              here is fine — it's a deliberate action per professor. */}
+          {isFinished && (
+            <div className="card">
+              <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom: showResults ? '.6rem' : 0 }}>
+                <h3 style={{ fontSize:'.75rem', letterSpacing:'.1em', color:'var(--muted)' }}>RESULTADOS</h3>
+                <button className="btn btn-primary btn-sm" onClick={() => setShowResults(v => !v)}>
+                  {showResults ? 'Ocultar resultados' : 'Ver resultados'}
+                </button>
+              </div>
+
+              {showResults && (
+                <div className="results-grid">
+                  {sortedStudents.map(st => {
+                    const correct  = responses.filter(r => r.student_id === st.id && r.is_correct).length
+                    const answered = responses.filter(r => r.student_id === st.id).length
+                    return (
+                      <div key={st.id} className="student-cell">
+                        <span className="card-no">#{st.card_id}</span>
+                        <span className="student-name">{st.name}</span>
+                        <span className="score">{correct}/{answered}</span>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
             </div>
+          )}
+        </div>
 
-            {showResults && (() => {
-              const rows = [...students]
-                .sort((a, b) => a.card_id - b.card_id)
-                .map(st => ({
-                  card_id:  st.card_id,
-                  name:     st.name,
-                  correct:  responses.filter(r => r.student_id === st.id && r.is_correct).length,
-                  answered: responses.filter(r => r.student_id === st.id).length,
-                }))
-              const mid = Math.ceil(rows.length / 2)
-              const halves = [rows.slice(0, mid), rows.slice(mid)]
-
-              const renderTable = (half, key) => (
-                <table key={key} style={{ flex: 1, borderCollapse: 'collapse', fontSize: '.8rem' }}>
-                  <thead>
-                    <tr style={{ color: 'var(--muted)', textAlign: 'left' }}>
-                      <th style={{ padding: '.4rem .5rem', fontWeight: 700, width: 44 }}>#</th>
-                      <th style={{ padding: '.4rem .5rem', fontWeight: 700 }}>Nombre</th>
-                      <th style={{ padding: '.4rem .5rem', fontWeight: 700, width: 70, textAlign: 'right' }}>Aciertos</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {half.map(r => (
-                      <tr key={r.card_id} style={{ borderTop: '1px solid var(--border)' }}>
-                        <td style={{ padding: '.4rem .5rem', fontFamily: 'var(--mono)', color: 'var(--muted)' }}>
-                          {r.card_id}
-                        </td>
-                        <td style={{ padding: '.4rem .5rem' }}>{r.name}</td>
-                        <td style={{ padding: '.4rem .5rem', fontFamily: 'var(--mono)', color: 'var(--accent)', textAlign: 'right' }}>
-                          {r.correct}/{r.answered}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )
-
-              return (
-                <div style={{ display: 'flex', gap: '1.5rem', alignItems: 'flex-start' }}>
-                  {renderTable(halves[0], 'left')}
-                  {halves[1].length > 0 && renderTable(halves[1], 'right')}
-                </div>
-              )
-            })()}
+        {/* Right: compact, always-visible student status sidebar */}
+        <div style={{ display:'flex', flexDirection:'column', minHeight:0 }}>
+          <div className="card" style={{ flex:1, display:'flex', flexDirection:'column', minHeight:0 }}>
+            <h3 style={{ fontSize:'.75rem', letterSpacing:'.1em', color:'var(--muted)', marginBottom:'.5rem', flexShrink:0 }}>
+              ALUMNOS ({totalStudents})
+            </h3>
+            <div className="student-grid-compact">
+              {sortedStudents.map(st => {
+                const answered = responses.some(r => r.student_id === st.id && r.slide_id === currentSlide?.id)
+                return (
+                  <div key={st.id} className={`student-cell compact${answered ? ' answered' : ''}`}>
+                    <span className="card-no">#{st.card_id}</span>
+                    <span className="student-name">{st.name}</span>
+                  </div>
+                )
+              })}
+            </div>
           </div>
-        )}
+        </div>
       </div>
 
       {showQR && <ScanQRModal sessionId={sessionId} onClose={() => setShowQR(false)} />}
