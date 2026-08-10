@@ -113,17 +113,23 @@ export default function ScanPage() {
 
   // Prev/Next from the phone — writes to the shared session row, same as
   // the computer's own navigation, so both devices stay in sync.
-  async function goToSlide(delta) {
-    if (!slides.length) return
-    const idx = slides.findIndex(s => s.id === currentSlideId)
-    const newIdx = idx + delta
-    if (newIdx < 0 || newIdx >= slides.length) return
-    const newSlideId = slides[newIdx].id
-    await supabase.from('sessions')
-      .update({ current_slide_id: newSlideId })
-      .eq('id', sessionId)
-    applySlideChange(newSlideId)
+ async function goToSlide(delta) {
+  if (!slides.length) return
+  const idx = slides.findIndex(s => s.id === currentSlideId)
+  const newIdx = idx + delta
+  if (newIdx < 0 || newIdx >= slides.length) return
+  const newSlideId = slides[newIdx].id
+
+  const { error } = await supabase.from('sessions')
+    .update({ current_slide_id: newSlideId })
+    .eq('id', sessionId)
+
+  if (error) {
+    console.error('No se pudo cambiar la slide:', error)
+    return
   }
+  applySlideChange(newSlideId)
+}
 
   // ── Realtime: follow slide changes from laptop (or from this phone) ──
   useEffect(() => {

@@ -15,13 +15,15 @@ import InstallPrompt from './components/InstallPrompt'
 // ── Protected route ───────────────────────────────────────
 function Protected({ children }) {
   const { user } = useAuth()
+  const location = useLocation()
   if (user === undefined) return (
     <div style={{ minHeight:'100vh', background:'var(--bg)', display:'flex',
       alignItems:'center', justifyContent:'center', color:'var(--muted)' }}>
       Loading…
     </div>
   )
-  if (user === null) return <Navigate to="/auth" replace />
+  if (user === null)
+    return <Navigate to="/auth" replace state={{ from: location.pathname + location.search }} />
   return children
 }
 
@@ -69,23 +71,11 @@ function Layout({ children }) {
 
 // ── Router decides whether to wrap with auth ──────────────
 function AppRoutes() {
-  const location = useLocation()
-  const isScanPage = location.pathname.startsWith('/scan/')
-
-  // Scan page is fully public — render without AuthProvider involvement
-  if (isScanPage) {
-    return (
-      <Routes>
-        <Route path="/scan/:sessionId" element={<ScanPage />} />
-      </Routes>
-    )
-  }
-
   return (
     <AuthProvider>
       <Routes>
         <Route path="/auth" element={<AuthGate />} />
-        <Route path="/scan/:sessionId" element={<ScanPage />} />
+        <Route path="/scan/:sessionId" element={<Protected><ScanPage /></Protected>} />
         <Route path="/" element={<Protected><Layout><CoursesPage /></Layout></Protected>} />
         <Route path="/presentations" element={<Protected><Layout><PresentationsPage /></Layout></Protected>} />
         <Route path="/presentations/:id/edit" element={<Protected><SlideEditorPage /></Protected>} />
@@ -98,10 +88,11 @@ function AppRoutes() {
 
 function AuthGate() {
   const { user } = useAuth()
-  if (user) return <Navigate to="/" replace />
+  const location = useLocation()
+  const dest = location.state?.from || '/'
+  if (user) return <Navigate to={dest} replace />
   return <AuthPage />
 }
-
 ReactDOM.createRoot(document.getElementById('root')).render(
   <BrowserRouter>
     <AppRoutes />

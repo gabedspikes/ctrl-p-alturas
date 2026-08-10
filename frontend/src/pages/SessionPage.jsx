@@ -304,7 +304,8 @@ export default function SessionPage() {
         </div>
 
         {/* Right: compact, always-visible student status sidebar */}
-        <div style={{ display:'flex', flexDirection:'column', minHeight:0 }}>
+        {/* Right: sidebar fijado a la altura del viewport para usar todo el vertical */}
+        <div style={{display:'flex', flexDirection:'column', minHeight:0, position:'sticky', top:'calc(57px + 1.5rem)', height:'calc(100vh - 57px - 3rem)'}}>
           <div className="card" style={{ flex:1, display:'flex', flexDirection:'column', minHeight:0 }}>
             <h3 style={{ fontSize:'.75rem', letterSpacing:'.1em', color:'var(--muted)', marginBottom:'.5rem', flexShrink:0 }}>
               ALUMNOS ({totalStudents})
