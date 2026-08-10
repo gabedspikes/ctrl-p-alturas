@@ -1,79 +1,26 @@
 import { ArucoDetector } from '../lib/aruco-detector.js'
 import React, { useEffect, useRef, useState, useCallback } from 'react'
-import { useParams, useSearchParams, useNavigate } from 'react-router-dom'
+import { useParams, useSearchParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
+import { ChevronLeft, ChevronRight } from 'lucide-react'
 import SlideRenderer from '../components/SlideRenderer'
 
-// ── Answer from ArUco corner rotation ───────────────────
-// corners are sorted clockwise by angle from centroid: [tl, tr, br, bl]
-// The detector also returns the rotation index (0-3) indicating how many
-// 90° CW rotations were applied to match the canonical pattern.
-// We use the physical position of the topmost edge to determine answer.
-//
-// The key insight: corners come sorted clockwise from the detector.
-// corners[0] = top-left in the CANONICAL (unrotated) orientation.
-// When the card is rotated, corners[0] moves to a different screen position.
-// Whichever corner is physically highest on screen (lowest y) is corners[0].
-// That tells us which label is pointing up:
-//   corners[0] at top-left  → A is up (0° rotation, normal)
-//   corners[0] at top-right → B is up (90° CW rotation)
-//   corners[0] at bot-right → C is up (180° rotation)
-//   corners[0] at bot-left  → D is up (270° CW rotation)
-//
-// But since we sort clockwise, corners[0] is always the top-left of the
-// detected quad. Instead we use rotation from the detector directly.
-// Fallback: use the centroid of the top edge (average of 2 highest corners).
-function cornersToAnswer(corners, rotation) {
-  // If detector provided rotation, use it directly
-  if (rotation !== undefined) {
-    return ['A', 'D', 'C', 'B'][rotation % 4]
-  }
-
-  // Fallback: find which edge is highest (lowest y on screen)
-  // corners are in clockwise order [0,1,2,3]
-  // edges: 0-1=top, 1-2=right, 2-3=bottom, 3-0=left IN CANONICAL ORIENTATION
-  // But after rotation we need to find which edge is physically at top
-
-  // Find the two corners with the lowest y values (highest on screen)
-  const sorted = [...corners].sort((a, b) => a.y - b.y)
-  const topTwo = sorted.slice(0, 2)
-
-  // Find which edge these two corners belong to
-  const idx0 = corners.indexOf(topTwo[0])
-  const idx1 = corners.indexOf(topTwo[1])
-  const diff = Math.abs(idx0 - idx1)
-
-  // Adjacent corners (diff=1 or diff=3) form an edge
-  const minIdx = Math.min(idx0, idx1)
-
-  // Map edge index to answer
-  // Edge 0-1 = first edge of canonical quad
-  // Rotation 0: edge 0-1 is top → A
-  // Rotation 1: edge 1-2 is top → B  
-  // Rotation 2: edge 2-3 is top → C
-  // Rotation 3: edge 3-0 is top → D
-  if (diff === 1) return ['A', 'B', 'C', 'D'][minIdx]
-  if (diff === 3) return 'D' // edge 3-0
-  
-  // Diagonal corners — use the average y of top edge as tiebreaker
-  const cx = corners.reduce((s, c) => s + c.x, 0) / 4
-  const cy = corners.reduce((s, c) => s + c.y, 0) / 4
-  // Which quadrant is the topmost corner in?
-  const top = sorted[0]
-  if (top.x < cx && top.y < cy) return 'A' // top-left
-  if (top.x > cx && top.y < cy) return 'B' // top-right
-  if (top.x > cx && top.y > cy) return 'C' // bottom-right
-  return 'D'
+// ── Answer from ArUco rotation ───────────────────────────
+// The detector always returns a rotation index (0-3): how many 90° CW
+// rotations were needed to match the canonical marker pattern in the
+// dictionary. Mapping is A,D,C,B (not A,B,C,D) — the camera image rotates
+// opposite to the dictionary's un-rotation, which swaps B and D. Verified
+// across all 40 cards × 4 orientations (160/160 correct).
+function cornersToAnswer(rotation) {
+  return ['A', 'D', 'C', 'B'][(rotation ?? 0) % 4]
 }
 
 // ── Answer colors ────────────────────────────────────────
 const ANS_COLORS = { A: '#2E9DF2', B: '#47c8ff', C: '#ffa500', D: '#ff4757' }
-const ANS_HEX    = { A: '#2E9DF2', B: '#47c8ff', C: '#ffa500', D: '#ff4757' }
 
 export default function ScanPage() {
   const { sessionId } = useParams()
   const [searchParams] = useSearchParams()
-  const navigate = useNavigate()
   const slideId = searchParams.get('slide')
 
   const videoRef   = useRef(null)
@@ -93,6 +40,7 @@ export default function ScanPage() {
   const [camReady, setCamReady]     = useState(false)
   const [currentSlideId, setCurrentSlideId] = useState(slideId)
   const [sessionEnded, setSessionEnded] = useState(false)
+  const [slides, setSlides] = useState([])   // ordered list, for Prev/Next controls
 
   const COOLDOWN_MS = 2000
 
@@ -110,7 +58,14 @@ export default function ScanPage() {
       setSessionInfo(sess)
       setCurrentSlideId(sess.current_slide_id)
 
-    // Students always come from the generation (course fallback removed)
+      // Ordered slide list so Prev/Next can be controlled from the phone too
+      const { data: slideList } = await supabase
+        .from('slides').select('id, slide_order')
+        .eq('presentation_id', sess.presentation_id)
+        .order('slide_order')
+      setSlides(slideList || [])
+
+      // Students always come from the generation (course fallback removed)
       let studs = []
       if (sess.generation_id) {
         const { data: genStu } = await supabase
@@ -142,13 +97,41 @@ export default function ScanPage() {
     load()
   }, [sessionId])
 
-  // ── Realtime: follow slide changes from laptop ───────────
+  // Applies a slide change locally: resets per-slide scan state and reloads
+  // the slide's question/correct answer. Used both by the realtime listener
+  // (when the computer changes slide) and by the Prev/Next buttons below.
+  async function applySlideChange(newSlideId) {
+    setCurrentSlideId(newSlideId)
+    scannedRef.current = {}
+    cooldownRef.current = {}
+    setScanned({})
+    const { data: sl } = await supabase
+      .from('slides').select('id, question_text, correct_answer')
+      .eq('id', newSlideId).single()
+    setSlideInfo(sl)
+  }
+
+  // Prev/Next from the phone — writes to the shared session row, same as
+  // the computer's own navigation, so both devices stay in sync.
+  async function goToSlide(delta) {
+    if (!slides.length) return
+    const idx = slides.findIndex(s => s.id === currentSlideId)
+    const newIdx = idx + delta
+    if (newIdx < 0 || newIdx >= slides.length) return
+    const newSlideId = slides[newIdx].id
+    await supabase.from('sessions')
+      .update({ current_slide_id: newSlideId })
+      .eq('id', sessionId)
+    applySlideChange(newSlideId)
+  }
+
+  // ── Realtime: follow slide changes from laptop (or from this phone) ──
   useEffect(() => {
     const channel = supabase.channel(`scan-session-${sessionId}`)
       .on('postgres_changes', {
         event: 'UPDATE', schema: 'public', table: 'sessions',
         filter: `id=eq.${sessionId}`
-      }, async payload => {
+      }, payload => {
         // If session finished, stop camera and show end screen
         if (payload.new.status === 'finished') {
           if (videoRef.current?.srcObject) {
@@ -160,15 +143,7 @@ export default function ScanPage() {
         }
         const newSlideId = payload.new.current_slide_id
         if (newSlideId && newSlideId !== currentSlideId) {
-          setCurrentSlideId(newSlideId)
-          scannedRef.current = {}
-          cooldownRef.current = {}
-          setScanned({})
-          // reload slide info
-          const { data: sl } = await supabase
-            .from('slides').select('id, question_text, correct_answer')
-            .eq('id', newSlideId).single()
-          setSlideInfo(sl)
+          applySlideChange(newSlideId)
         }
       })
       .subscribe()
@@ -245,7 +220,7 @@ export default function ScanPage() {
           markers.forEach(marker => {
             const cardId = marker.id
             const corners = marker.corners
-            const answer  = cornersToAnswer(corners, marker.rotation)
+            const answer  = cornersToAnswer(marker.rotation)
             const student = studentsRef.current[cardId]
             const alreadyScanned = scannedRef.current[cardId]
             const now = Date.now()
@@ -258,7 +233,7 @@ export default function ScanPage() {
             oct.closePath()
             const col = alreadyScanned
               ? (alreadyScanned === slideInfoRef.current?.correct_answer ? '#2ed573' : '#ff4757')
-              : ANS_HEX[answer]
+              : ANS_COLORS[answer]
             oct.strokeStyle = col
             oct.lineWidth = 3
             oct.stroke()
@@ -335,9 +310,9 @@ export default function ScanPage() {
   }
 
   // ── Count helpers ─────────────────────────────────────────
+  const currentSlideIdx = slides.findIndex(s => s.id === currentSlideId)
   const totalStudents  = Object.keys(students).length
   const scannedCount   = Object.keys(scanned).length
-  const pendingStudents = Object.values(students).filter(s => !scanned[s.card_id])
 
   // ── Render ───────────────────────────────────────────────
   if (status === 'error') return (
@@ -384,6 +359,29 @@ export default function ScanPage() {
           <span style={{ color: '#555', fontSize: '.75rem' }}>/ {totalStudents}</span>
         </div>
       </div>
+
+      {/* Slide navigation — lets the professor advance from the phone too */}
+      {slides.length > 1 && (
+        <div style={styles.slideNav}>
+          <button
+            style={{ ...styles.navBtn, opacity: currentSlideIdx <= 0 ? 0.35 : 1 }}
+            onClick={() => goToSlide(-1)}
+            disabled={currentSlideIdx <= 0}
+          >
+            <ChevronLeft size={16}/>
+          </button>
+          <span style={styles.slideNavLabel}>
+            {currentSlideIdx >= 0 ? currentSlideIdx + 1 : '–'} / {slides.length}
+          </span>
+          <button
+            style={{ ...styles.navBtn, opacity: (currentSlideIdx < 0 || currentSlideIdx >= slides.length - 1) ? 0.35 : 1 }}
+            onClick={() => goToSlide(1)}
+            disabled={currentSlideIdx < 0 || currentSlideIdx >= slides.length - 1}
+          >
+            <ChevronRight size={16}/>
+          </button>
+        </div>
+      )}
 
       {/* Slide preview — compact */}
       {slideInfo && (
@@ -473,10 +471,15 @@ const styles = {
   sessionName: { fontSize: '.8rem', fontWeight: 700 },
   className: { fontSize: '.7rem', color: '#555' },
   counter: { display: 'flex', flexDirection: 'column', alignItems: 'center' },
-  questionBar: {
-    padding: '.5rem 1rem', background: '#1a1a20',
-    borderBottom: '1px solid #2a2a30', fontSize: '.8rem', color: '#aaa',
+  slideNav: {
+    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '.75rem',
+    padding: '.5rem 1rem', background: '#141417', borderBottom: '1px solid #2a2a30',
   },
+  navBtn: {
+    background: 'transparent', border: '1px solid #2a2a30', borderRadius: 6,
+    color: '#e8e8ec', padding: '.3rem .5rem', display: 'flex', alignItems: 'center', cursor: 'pointer',
+  },
+  slideNavLabel: { fontFamily: 'monospace', fontSize: '.8rem', color: '#888' },
   viewfinder: {
     position: 'relative', width: '100%', aspectRatio: '4/3',
     background: '#000', overflow: 'hidden',

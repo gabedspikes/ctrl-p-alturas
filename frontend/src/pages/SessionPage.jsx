@@ -138,7 +138,10 @@ export default function SessionPage() {
     load()
   }, [sessionId])
 
-  // Realtime: new responses from phone scanner
+  // Realtime: keeps in sync with the phone scanner in both directions —
+  // new responses (INSERT) coming from a scan, and slide changes (UPDATE)
+  // made from the phone's own Prev/Next controls. One channel, two listeners,
+  // instead of two separate websocket subscriptions.
   useEffect(() => {
     const channel = supabase.channel(`session-${sessionId}`)
       .on('postgres_changes', {
@@ -147,9 +150,19 @@ export default function SessionPage() {
       }, payload => {
         setResponses(prev => prev.find(r => r.id === payload.new.id) ? prev : [...prev, payload.new])
       })
+      .on('postgres_changes', {
+        event: 'UPDATE', schema: 'public', table: 'sessions',
+        filter: `id=eq.${sessionId}`
+      }, payload => {
+        const newSlideId = payload.new.current_slide_id
+        if (newSlideId) {
+          const idx = slides.findIndex(s => s.id === newSlideId)
+          if (idx >= 0) setCurrentIdx(idx)
+        }
+      })
       .subscribe()
     return () => supabase.removeChannel(channel)
-  }, [sessionId])
+  }, [sessionId, slides])
 
   async function goTo(idx) {
     if (idx < 0 || idx >= slides.length) return
