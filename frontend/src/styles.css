@@ -278,3 +278,20 @@ label { display: block; font-size: .75rem; color: var(--muted);
 .student-cell.answered .card-no {
   color: var(--success);
 }
+@media (max-width: 640px) {
+  .nav {
+    flex-wrap: wrap;
+    gap: .5rem 1rem;
+    padding: .6rem 1rem;
+    height: auto;
+  }
+  .nav-links {
+    order: 3;
+    width: 100%;
+    gap: 1.25rem;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .nav-links a { white-space: nowrap; padding-bottom: .15rem; }
+  .main { padding: 1rem; }
+}
