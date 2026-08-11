@@ -1,7 +1,21 @@
 /**
- * aruco-detector.js — v2
+ * aruco-detector.js — v3 (false-positive hardening)
  * Reliable browser-based marker detector.
  * Uses canvas-based sampling after finding candidate quads via edge detection.
+ *
+ * Cambios respecto a v2 (para evitar falsos positivos, p. ej. teclas):
+ *   Capa 1:
+ *     - validateAndExtract() rechaza interiores casi uniformes (cuadrados
+ *       sólidos como una tecla o el hueco negro entre teclas).
+ *     - matchDict() baja ACCEPT_MAX de 3 a 2 (≈8× menos aceptaciones al azar,
+ *       sin perder lecturas reales, que caen a distancia 0–1).
+ *   Capa 2:
+ *     - detect() exige geometría más estricta (aspecto casi cuadrado + relleno
+ *       mínimo) y una "zona de silencio" clara alrededor del candidato.
+ *
+ * Si alguna tarjeta real dejara de leerse en ángulos muy oblicuos, los dos
+ * knobs a relajar primero son: el rango de aspecto (0.7–1.4) y el factor de la
+ * zona de silencio (1.2). Todo lo demás tiene margen de sobra.
  */
 
 import { MARKERS as MARKER_DICT } from './markers.js'
@@ -178,6 +192,16 @@ function validateAndExtract(bits) {
   for (let r = 1; r <= 5; r++)
     for (let c = 1; c <= 5; c++)
       inner.push(bits[r*7+c])
+
+  // ── Capa 1: rechazo de interiores casi uniformes ──
+  // Los marcadores reales son 36–64% negros por diseño (ver markers.js). Un
+  // cuadrado sólido (una tecla, o el hueco negro entre teclas) llega hasta aquí
+  // con el borde negro pero un interior casi uniforme → lo descartamos antes de
+  // tocar el diccionario. Rango holgado (7–18 de 25 ≈ 28–72%) para tolerar ruido
+  // de muestreo sin perder marcadores reales.
+  const black = inner.reduce((s, b) => s + b, 0)
+  if (black < 7 || black > 18) return null
+
   return inner
 }
 
@@ -198,9 +222,10 @@ function rotate5x5(bits, times) {
 // Rejects ambiguous reads: only accepts a match that is clearly ONE pattern.
 //   ACCEPT_MAX  — best match must differ by at most this many cells (read quality)
 //   MIN_MARGIN  — the runner-up must be at least this much worse (no ambiguity)
-// With the 40-pattern dictionary the correct pattern sits at distance 0 and the
-// next candidate at 7, so these thresholds reject bad reads without losing good ones.
-const ACCEPT_MAX = 3
+// El diccionario de 40 patrones tiene distancia mínima 7, así que un decodificador
+// de radio 2 sigue corrigiendo lecturas con 2 celdas mal (2·2+1 = 5 ≤ 7) sin
+// riesgo de confundir dos alumnos, pero rechaza ~8× más ruido que con radio 3.
+const ACCEPT_MAX = 2   // Capa 1: antes 3
 const MIN_MARGIN = 3
 function matchDict(inner) {
   let bestId = -1, bestDist = 99, bestRot = 0
@@ -224,6 +249,27 @@ function matchDict(inner) {
   return { id: bestId, rotation: bestRot }
 }
 
+// ── Quiet-zone check (Capa 2) ─────────────────────────────
+// Muestrea un punto justo por fuera de cada esquina del candidato y exige que
+// sea claro. Un marcador real tiene margen blanco alrededor; una tecla está
+// pegada a sus vecinas y no lo tiene. Si el candidato está en el borde del
+// cuadro y quedan menos de 3 muestras válidas, no bloqueamos (para no perder
+// tarjetas legítimas parcialmente fuera de cámara).
+function quietZoneOk(gray, corners) {
+  const cx = (corners[0].x + corners[1].x + corners[2].x + corners[3].x) / 4
+  const cy = (corners[0].y + corners[1].y + corners[2].y + corners[3].y) / 4
+  let light = 0, total = 0
+  for (const c of corners) {
+    const x = Math.round(cx + (c.x - cx) * 1.2)
+    const y = Math.round(cy + (c.y - cy) * 1.2)
+    if (x < 0 || x >= gray.width || y < 0 || y >= gray.height) continue
+    total++
+    if (gray.data[y * gray.width + x] >= 128) light++
+  }
+  if (total < 3) return true          // muestras insuficientes → no bloquear
+  return light >= total - 1           // permite 1 muestra oscura (borde de vecino)
+}
+
 // ── Main Detector class ───────────────────────────────────
 export class ArucoDetector {
   detect(imageData) {
@@ -235,17 +281,29 @@ export class ArucoDetector {
 
     for (const region of regions) {
       const { w, h } = region
-      // Aspect ratio check: must be roughly square
+
+      // ── Capa 2: geometría más estricta ──
+      // Aspecto: un marcador es casi cuadrado (antes 0.5–2.0, demasiado laxo).
       const ratio = w / h
-      if (ratio < 0.5 || ratio > 2.0) continue
+      if (ratio < 0.7 || ratio > 1.4) continue
+
+      // Relleno: la región negra debe ocupar una fracción razonable de su caja.
+      // Descarta contornos finos y formas huecas (glifos impresos en teclas,
+      // juntas en forma de L entre teclas). Umbral conservador (0.30) para no
+      // perder marcadores reales, cuyo relleno ronda 0.5–0.75.
+      const fill = region.pixels.length / (w * h)
+      if (fill < 0.30) continue
 
       const corners = findCorners(region)
       if (!corners) continue
 
+      // ── Capa 2: zona de silencio ──
+      if (!quietZoneOk(gray, corners)) continue
+
       // Sample the 7x7 grid
       const bits = sampleMarker(gray, corners, 7)
 
-      // Validate border and get inner bits
+      // Validate border + interior density, get inner bits
       const inner = validateAndExtract(bits)
       if (!inner) continue
 

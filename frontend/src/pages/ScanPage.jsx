@@ -30,6 +30,7 @@ export default function ScanPage() {
   const detectorRef = useRef(null)
   const cooldownRef = useRef({})   // card_id → last scan timestamp
   const scannedRef  = useRef({})   // card_id → answer (this slide)
+  const confirmRef  = useRef({})   // card_id → { answer, count }  ← nuevo
 
   const [students, setStudents]     = useState({})  // card_id → student
   const [scanned, setScanned]       = useState({})  // card_id → answer
@@ -43,6 +44,7 @@ export default function ScanPage() {
   const [slides, setSlides] = useState([])   // ordered list, for Prev/Next controls
 
   const COOLDOWN_MS = 2000
+  const CONFIRM_FRAMES = 3   // frames coincidentes antes de registrar
 
   // ── Load session + students + slide ─────────────────────
   useEffect(() => {
@@ -104,7 +106,9 @@ export default function ScanPage() {
     setCurrentSlideId(newSlideId)
     scannedRef.current = {}
     cooldownRef.current = {}
+    confirmRef.current  = {} 
     setScanned({})
+    
     const { data: sl } = await supabase
       .from('slides').select('id, question_text, correct_answer')
       .eq('id', newSlideId).single()
@@ -271,11 +275,18 @@ export default function ScanPage() {
             oct.lineWidth = 2
             oct.stroke()
 
-            // Submit if new and cooled down
-            if (student && cooled && !alreadyScanned) {
-              cooldownRef.current[cardId] = now
-              submitAnswer(cardId, answer, student.id)
-            }
+            // Submit only after N frames agree (filtra falsos positivos esporádicos)
+if (student && cooled && !alreadyScanned) {
+  const prev = confirmRef.current[cardId]
+  if (prev && prev.answer === answer) prev.count++
+  else confirmRef.current[cardId] = { answer, count: 1 }
+
+  if (confirmRef.current[cardId].count >= CONFIRM_FRAMES) {
+    cooldownRef.current[cardId] = now
+    confirmRef.current[cardId] = null
+    submitAnswer(cardId, answer, student.id)
+  }
+}
           })
         } catch (e) {
           // detection errors are non-fatal, just skip frame
