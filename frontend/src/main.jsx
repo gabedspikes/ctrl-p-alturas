@@ -11,6 +11,7 @@ import ScanPage from './pages/ScanPage'
 import CardGeneratorPage from './pages/CardGeneratorPage'
 import './styles.css'
 import InstallPrompt from './components/InstallPrompt'
+import ScanEntryPage from './pages/ScanEntryPage'
 
 // ── Protected route ───────────────────────────────────────
 function Protected({ children }) {
@@ -46,6 +47,7 @@ function Layout({ children }) {
           <NavLink to="/" end className={({isActive}) => isActive ? 'active' : ''}>Cursos</NavLink>
           <NavLink to="/presentations" className={({isActive}) => isActive ? 'active' : ''}>Tests</NavLink>
           <NavLink to="/cards" className={({isActive}) => isActive ? 'active' : ''}>Tarjetas</NavLink>
+          <NavLink to="/scan" className={({isActive}) => isActive ? 'active' : ''}>Escanear</NavLink>
         </div>
         <div style={{ marginLeft:'auto', display:'flex', alignItems:'center', gap:'.75rem' }}>
           <button className="btn btn-ghost btn-sm"
@@ -75,6 +77,7 @@ function AppRoutes() {
     <AuthProvider>
       <Routes>
         <Route path="/auth" element={<AuthGate />} />
+        <Route path="/scan" element={<Protected><Layout><ScanEntryPage /></Layout></Protected>} />
         <Route path="/scan/:sessionId" element={<Protected><ScanPage /></Protected>} />
         <Route path="/" element={<Protected><Layout><CoursesPage /></Layout></Protected>} />
         <Route path="/presentations" element={<Protected><Layout><PresentationsPage /></Layout></Protected>} />

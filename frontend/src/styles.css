@@ -212,7 +212,7 @@ label { display: block; font-size: .75rem; color: var(--muted);
 /* Two columns: slide + controls + optional results on the left (wide),
    compact always-visible student status on the right (narrow, own scroll). */
 .session-layout {
-  display: grid; grid-template-columns: 1fr 500px;  /* un poco más ancho */
+  display: grid; grid-template-columns: 1fr 520px;  /* un poco más ancho */
   gap: 1.5rem; padding: 1.5rem;
   min-height: calc(100vh - 57px);
   align-items: stretch;   /* antes: start */

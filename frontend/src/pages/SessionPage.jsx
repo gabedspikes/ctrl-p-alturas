@@ -6,51 +6,32 @@ import SlideRenderer from '../components/SlideRenderer'
 
 import QRCode from 'qrcode'
 
-// ── QR Code modal ────────────────────────────────────────
-function ScanQRModal({ sessionId, onClose }) {
-  const scanUrl = `${window.location.origin}/scan/${sessionId}`
-  const canvasRef = useRef(null)
-  const [qrError, setQrError] = useState(false)
-
-  useEffect(() => {
-    if (!canvasRef.current) return
-    QRCode.toCanvas(canvasRef.current, scanUrl, {
-      width: 200,
-      margin: 1,
-      color: { dark: '#0d0d0f', light: '#ffffff' },
-    }).catch(() => setQrError(true))
-  }, [scanUrl])
+// ── Código de sesión (para escanear desde el móvil) ──────
+function ScanCodeModal({ scanCode, onClose }) {
+  const pretty = scanCode ? `${scanCode.slice(0, 3)} ${scanCode.slice(3)}` : '––– –––'
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal" style={{ maxWidth: 400, textAlign: 'center' }} onClick={e => e.stopPropagation()}>
         <h2 style={{ marginBottom: '.5rem' }}>Abrir Escáner en el Móvil</h2>
         <p style={{ color: 'var(--muted)', fontSize: '.85rem', marginBottom: '1.5rem' }}>
-          Escanea este código QR con la cámara de tu teléfono para abrir el escáner.
+          En tu teléfono, abre la app, entra a <strong style={{ color: 'var(--text)' }}>Escanear</strong> e
+          ingresa este código:
         </p>
 
-        {!qrError ? (
-          <canvas
-            ref={canvasRef}
-            style={{ borderRadius: 8, border: '4px solid var(--accent)', marginBottom: '1rem' }}
-          />
-        ) : (
-          <p style={{ color: 'var(--danger)', fontSize: '.8rem', marginBottom: '1rem' }}>
-            No se pudo generar el código QR. Usa el link de abajo.
-          </p>
-        )}
-
-        <p style={{ fontSize: '.75rem', color: 'var(--muted)', marginBottom: '.5rem' }}>
-          O abre este link manualmente:
-        </p>
-        <code style={{
-          display: 'block', background: 'var(--bg)', border: '1px solid var(--border)',
-          borderRadius: 6, padding: '.6rem', fontSize: '.75rem',
-          color: 'var(--accent)', wordBreak: 'break-all', marginBottom: '1.25rem'
+        <div style={{
+          fontSize: '2.75rem', fontWeight: 700, fontFamily: 'monospace',
+          letterSpacing: '.35rem', color: 'var(--accent)',
+          background: 'var(--bg)', border: '2px solid var(--accent)',
+          borderRadius: 12, padding: '1rem', marginBottom: '1.25rem',
         }}>
-          {scanUrl}
-        </code>
-        <button className="btn btn-ghost" onClick={onClose}>Close</button>
+          {pretty}
+        </div>
+
+        <p style={{ fontSize: '.75rem', color: 'var(--muted)', marginBottom: '1.25rem' }}>
+          El código funciona mientras la sesión esté en vivo y sirve en el navegador o en la PWA instalada.
+        </p>
+        <button className="btn btn-ghost" onClick={onClose}>Cerrar</button>
       </div>
     </div>
   )
@@ -325,7 +306,7 @@ export default function SessionPage() {
         </div>
       </div>
 
-      {showQR && <ScanQRModal sessionId={sessionId} onClose={() => setShowQR(false)} />}
+      {showQR && <ScanCodeModal scanCode={session?.scan_code} onClose={() => setShowQR(false)} />}
     </div>
   )
 }
