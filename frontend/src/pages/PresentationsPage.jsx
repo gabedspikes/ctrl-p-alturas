@@ -268,12 +268,15 @@ export default function PresentationsPage() {
         <div className="card-grid">
           {presentations.map(p => (
             <div key={p.id} className="card" style={{ display:'flex', flexDirection:'column', gap:'.75rem' }}>
-              <div>
-                <h3>{p.title}</h3>
-                <div style={{ display:'flex', gap:'.35rem', marginTop:'.5rem', flexWrap:'wrap' }}>
-                  <span className="badge badge-blue">{p.courses?.name || 'No class'}</span>
-                  {p.subjects?.name && <span className="badge badge-accent">{p.subjects.name}</span>}
+              <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', gap:'.5rem' }}>
+                <div>
+                  <h3>{p.title}</h3>
+                  <div style={{ display:'flex', gap:'.35rem', marginTop:'.5rem', flexWrap:'wrap' }}>
+                    <span className="badge badge-blue">{p.courses?.name || 'No class'}</span>
+                    {p.subjects?.name && <span className="badge badge-accent">{p.subjects.name}</span>}
+                  </div>
                 </div>
+                <button className="btn btn-ghost btn-sm" onClick={() => setModal(p)}>Editar</button>
               </div>
               <div style={{ display:'flex', gap:'.5rem', marginTop:'auto', flexWrap:'wrap' }}>
                 <button className="btn btn-ghost btn-sm"
@@ -283,7 +286,6 @@ export default function PresentationsPage() {
                 <button className="btn btn-primary btn-sm" onClick={() => setSessionModal(p)}>
                   <Play size={12}/> Ejecutar
                 </button>
-                <button className="btn btn-ghost btn-sm" onClick={() => setModal(p)}>Editar</button>
                 <button className="btn btn-danger btn-sm" onClick={() => deletePresentation(p.id)}>
                   <Trash2 size={12}/>
                 </button>

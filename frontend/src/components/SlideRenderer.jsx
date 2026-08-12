@@ -53,6 +53,7 @@ export default function SlideRenderer({
   const hasAnswers = answers.some(a => a.text || a.image)
   const hasImage = !!slide.image_url
   const hasQuestion = !!slide.question_text
+  const gridLayout = hasAnswers && slide.answer_layout === 'grid'
 
   const qFontSize = (compact ? 11 : Math.max(14, Math.min(28, 28 - (slide.question_text?.length || 0) * 0.15))) * textScale
   const aFontSize = (compact ? 9 : 13) * textScale
@@ -71,7 +72,7 @@ export default function SlideRenderer({
     }}>
       {/* Question area */}
       <div style={{
-        flex: hasImage ? '0 0 auto' : hasAnswers ? '1 1 auto' : '1',
+        flex: gridLayout ? '0 0 auto' : hasImage ? '0 0 auto' : hasAnswers ? '1 1 auto' : '1',
         padding: compact ? '10px 12px 6px' : `${20*scale}px ${28*scale}px ${12*scale}px`,
         display: 'flex',
         alignItems: hasAnswers || hasImage ? 'flex-start' : 'center',
@@ -122,7 +123,7 @@ export default function SlideRenderer({
       )}
 
       {/* Answer rows */}
-      {hasAnswers && (
+      {hasAnswers && !gridLayout && (
         <div style={{
           flex: '0 0 auto',
           padding: compact ? '4px 12px 8px' : `${8*scale}px ${28*scale}px ${20*scale}px`,
@@ -220,7 +221,66 @@ export default function SlideRenderer({
           })}
         </div>
       )}
-
+{/* Answer grid (2x2) — imagen arriba, texto abajo */}
+      {hasAnswers && gridLayout && (
+        <div style={{
+          flex: 1, minHeight: 0,
+          display: 'grid',
+          gridTemplateColumns: '1fr 1fr',
+          gridTemplateRows: '1fr 1fr',
+          gap: compact ? 4 : Math.max(6, 10*scale),
+          padding: compact ? '4px 12px 8px' : `${8*scale}px ${28*scale}px ${20*scale}px`,
+        }}>
+          {answers.map(({ letter, text, image }) => {
+            const col = ANS_COLORS[letter]
+            const isCorrect = showCorrect && slide.correct_answer === letter
+            return (
+              <div key={letter} style={{
+                display: 'flex', flexDirection: 'column', minHeight: 0,
+                alignItems: 'center', justifyContent: 'center',
+                gap: compact ? 3 : Math.max(4, 6*scale),
+                background: isCorrect ? col.bg : dark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.04)',
+                border: `${compact ? 1 : 1.5}px solid ${isCorrect ? col.border : dark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)'}`,
+                borderRadius: 6,
+                padding: compact ? 4 : Math.max(6, 10*scale),
+                overflow: 'hidden',
+              }}>
+                {image && (
+                  <img src={image} alt={`Answer ${letter}`} style={{
+                    flex: 1, minHeight: 0, maxWidth: '100%',
+                    objectFit: 'contain', borderRadius: 4,
+                  }}/>
+                )}
+                <div style={{
+                  display: 'flex', alignItems: 'center', flexShrink: 0, maxWidth: '100%',
+                  gap: compact ? 4 : Math.max(5, 8*scale),
+                }}>
+                  <div style={{
+                    width: compact ? 16 : Math.max(20, 24*scale),
+                    height: compact ? 16 : Math.max(20, 24*scale),
+                    borderRadius: 4,
+                    background: isCorrect ? col.border : 'transparent',
+                    border: `2px solid ${col.border}`,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    flexShrink: 0,
+                    fontSize: compact ? 9 : Math.max(10, 12*scale),
+                    fontWeight: 800,
+                    color: isCorrect ? '#fff' : col.label,
+                    fontFamily: "'DM Mono', monospace",
+                  }}>{letter}</div>
+                  <span style={{
+                    color: text ? textColor : mutedColor,
+                    fontSize: aFontSize,
+                    fontWeight: isCorrect ? 600 : 400,
+                    lineHeight: 1.25,
+                    overflow: 'hidden', textOverflow: 'ellipsis',
+                  }}>{text || (image ? '' : `Answer ${letter}`)}</span>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
       {/* Empty state */}
       {!hasQuestion && !hasAnswers && !hasImage && (
         <div style={{

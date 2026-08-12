@@ -34,6 +34,7 @@ const EMPTY_SLIDE_FIELDS = {
   bg_color: '#1a1a20',
   image_url: null,
   text_scale: 1,
+  answer_layout: 'list',
 }
 
 export default function SlideEditorPage() {
@@ -59,8 +60,8 @@ export default function SlideEditorPage() {
   // ── Load ─────────────────────────────────────────────────
   useEffect(() => {
     async function init() {
-      const { data: pres } = await supabase
-        .from('presentations').select('*, courses(name)').eq('id', presentationId).single()
+     const { data: pres } = await supabase
+        .from('presentations').select('*, courses(name), subjects(name)').eq('id', presentationId).single()
       setPresentation(pres)
 
       const { data: sl } = await supabase
@@ -100,6 +101,7 @@ export default function SlideEditorPage() {
       answer_c_image: slide.answer_c_image || null,
       answer_d_image: slide.answer_d_image || null,
       text_scale:     slide.text_scale     || 1,
+      answer_layout: slide.answer_layout || 'list',
     })
     setDirty(false)
   }
@@ -129,6 +131,7 @@ export default function SlideEditorPage() {
       answer_c_image: d.answer_c_image || null,
       answer_d_image: d.answer_d_image || null,
       text_scale:     d.text_scale     || 1,
+      answer_layout: d.answer_layout || 'list',
     }).eq('id', slide.id)
 
     // refresh list
@@ -194,8 +197,14 @@ export default function SlideEditorPage() {
 
   async function handleAnswerImageUpload(letter, file) {
     if (!file) return
+    const l = letter.toLowerCase()
     setAnsUploading(u => ({ ...u, [letter]: true }))
-    updateDraft(`answer_${letter.toLowerCase()}_image`, await uploadToBucket(file))
+    const url = await uploadToBucket(file)
+    updateDraft(`answer_${l}_image`, url)
+    // Asegura que siempre haya texto descriptivo; el profe lo reemplaza.
+    if (!draftRef.current[`answer_${l}`]) {
+      updateDraft(`answer_${l}`, 'Porfavor agregar un texto descriptivo de la imagen')
+    }
     setAnsUploading(u => ({ ...u, [letter]: false }))
   }
 
@@ -230,7 +239,13 @@ export default function SlideEditorPage() {
           <span className="badge badge-blue" style={{ marginLeft:'.5rem' }}>
             {presentation.courses?.name}
           </span>
+          {presentation.subjects?.name && (
+            <span className="badge badge-accent" style={{ marginLeft:'.35rem' }}>
+              {presentation.subjects.name}
+            </span>
+          )}
         </div>
+    
         <div style={{ marginLeft:'auto', display:'flex', gap:'.5rem', alignItems:'center' }}>
           {dirty && (
             <span style={{ fontSize:'.75rem', color:'var(--muted)', fontStyle:'italic' }}>
@@ -378,7 +393,8 @@ export default function SlideEditorPage() {
                     <input
                       value={draft[field]}
                       onChange={e => updateDraft(field, e.target.value)}
-                      placeholder={`Answer ${l}…`}
+                      placeholder={`Respuesta ${l} (obligatoria)…`}
+                      required
                       style={{
                         fontSize:'.85rem',
                         borderColor: isCorrect ? ANS_COLORS[l] : undefined,
@@ -415,6 +431,33 @@ export default function SlideEditorPage() {
               )
             })}
           </div>
+      {/* Answer layout */}
+          <div style={{ padding:'1rem', borderBottom:'1px solid var(--border)' }}>
+            <label style={{ display:'block', fontSize:'.7rem', color:'var(--muted)',
+              fontWeight:700, letterSpacing:'.1em', marginBottom:'.75rem' }}>
+              DISPOSICIÓN DE RESPUESTAS
+            </label>
+            <div style={{ display:'flex', gap:'.4rem' }}>
+              {[['Lista','list'],['Cuadrícula 2×2','grid']].map(([label, val]) => {
+                const active = (draft.answer_layout || 'list') === val
+                return (
+                  <button key={val} onClick={() => updateDraft('answer_layout', val)}
+                    style={{
+                      flex:1, padding:'.4rem 0', borderRadius:6, cursor:'pointer',
+                      fontWeight:700, fontSize:'.75rem',
+                      border: active ? '2px solid var(--accent)' : '1px solid var(--border)',
+                      background: active ? 'rgba(46,157,242,.12)' : 'transparent',
+                      color: active ? 'var(--accent)' : 'var(--text)',
+                    }}>
+                    {label}
+                  </button>
+                )
+              })}
+            </div>
+            <p style={{ fontSize:'.7rem', color:'var(--muted)', marginTop:'.5rem' }}>
+              La cuadrícula muestra la imagen grande con el texto debajo — ideal para respuestas con imagen.
+            </p>
+          </div>
 {/* Text size */}
           <div style={{ padding:'1rem', borderBottom:'1px solid var(--border)' }}>
             <label style={{ display:'block', fontSize:'.7rem', color:'var(--muted)',
@@ -438,42 +481,6 @@ export default function SlideEditorPage() {
                 )
               })}
             </div>
-          </div>
-          {/* Image */}
-          <div style={{ padding:'1rem', borderBottom:'1px solid var(--border)' }}>
-            <label style={{ display:'block', fontSize:'.7rem', color:'var(--muted)',
-              fontWeight:700, letterSpacing:'.1em', marginBottom:'.75rem' }}>
-              IMAGE (optional)
-            </label>
-            {draft.image_url ? (
-              <div style={{ position:'relative' }}>
-                <img src={draft.image_url} alt="Slide"
-                  style={{ width:'100%', borderRadius:6, border:'1px solid var(--border)', display:'block' }}/>
-                <button onClick={removeImage} style={{
-                  position:'absolute', top:6, right:6,
-                  background:'rgba(0,0,0,.7)', border:'none', borderRadius:4,
-                  color:'#fff', cursor:'pointer', padding:'3px 6px', fontSize:12,
-                  display:'flex', alignItems:'center', gap:3,
-                }}>
-                  <X size={11}/> Quitar
-                </button>
-              </div>
-            ) : (
-              <label style={{
-                display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center',
-                gap:'.4rem', padding:'1.25rem', border:'2px dashed var(--border)',
-                borderRadius:8, cursor:'pointer', color:'var(--muted)', fontSize:'.8rem',
-                transition:'border-color .15s',
-              }}
-                onMouseEnter={e => e.currentTarget.style.borderColor='var(--accent)'}
-                onMouseLeave={e => e.currentTarget.style.borderColor='var(--border)'}
-              >
-                <ImageIcon size={22} style={{ opacity:.5 }}/>
-                {uploading ? 'Uploading…' : 'Click to upload image'}
-                <input type="file" accept="image/*" style={{ display:'none' }}
-                  onChange={handleImageUpload} disabled={uploading}/>
-              </label>
-            )}
           </div>
 
           {/* Background color */}
