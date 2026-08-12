@@ -29,9 +29,11 @@ function isColorDark(hex = '#1a1a20') {
 const EMPTY_SLIDE_FIELDS = {
   question_text: '',
   answer_a: '', answer_b: '', answer_c: '', answer_d: '',
+  answer_a_image: null, answer_b_image: null, answer_c_image: null, answer_d_image: null,
   correct_answer: null,
   bg_color: '#1a1a20',
   image_url: null,
+  text_scale: 1,
 }
 
 export default function SlideEditorPage() {
@@ -45,6 +47,7 @@ export default function SlideEditorPage() {
   const [saving, setSaving] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [dirty, setDirty] = useState(false) // unsaved changes flag
+  const [ansUploading, setAnsUploading] = useState({})   // { A:true, ... }
 
   const draftRef  = useRef(draft)
   const activeIdxRef = useRef(0)
@@ -92,6 +95,11 @@ export default function SlideEditorPage() {
       correct_answer: slide.correct_answer || null,
       bg_color:       slide.bg_color       || '#1a1a20',
       image_url:      slide.image_url      || null,
+      answer_a_image: slide.answer_a_image || null,
+      answer_b_image: slide.answer_b_image || null,
+      answer_c_image: slide.answer_c_image || null,
+      answer_d_image: slide.answer_d_image || null,
+      text_scale:     slide.text_scale     || 1,
     })
     setDirty(false)
   }
@@ -116,6 +124,11 @@ export default function SlideEditorPage() {
       correct_answer: d.correct_answer || null,
       bg_color:       d.bg_color       || '#1a1a20',
       image_url:      d.image_url      || null,
+      answer_a_image: d.answer_a_image || null,
+      answer_b_image: d.answer_b_image || null,
+      answer_c_image: d.answer_c_image || null,
+      answer_d_image: d.answer_d_image || null,
+      text_scale:     d.text_scale     || 1,
     }).eq('id', slide.id)
 
     // refresh list
@@ -158,28 +171,36 @@ export default function SlideEditorPage() {
     loadDraft(remaining[newIdx])
   }
 
-  // ── Image upload ─────────────────────────────────────────
+  // ── Image upload (shared) ────────────────────────────────
+  async function uploadToBucket(file) {
+    const path = `slides/${presentationId}/${Date.now()}_${file.name.replace(/\s/g,'_')}`
+    const { error } = await supabase.storage.from('slide-images').upload(path, file)
+    if (error) return URL.createObjectURL(file)   // fallback local (no persiste tras recargar)
+    const { data } = supabase.storage.from('slide-images').getPublicUrl(path)
+    return data.publicUrl
+  }
+
   async function handleImageUpload(e) {
     const file = e.target.files?.[0]
     if (!file) return
     setUploading(true)
-    const path = `slides/${presentationId}/${Date.now()}_${file.name.replace(/\s/g,'_')}`
-
-    const { error } = await supabase.storage.from('slide-images').upload(path, file)
-    if (error) {
-      // fallback: use local object URL (won't persist after reload but works for demo)
-      const url = URL.createObjectURL(file)
-      updateDraft('image_url', url)
-      setUploading(false)
-      return
-    }
-    const { data } = supabase.storage.from('slide-images').getPublicUrl(path)
-    updateDraft('image_url', data.publicUrl)
+    updateDraft('image_url', await uploadToBucket(file))
     setUploading(false)
   }
 
   function removeImage() {
     updateDraft('image_url', null)
+  }
+
+  async function handleAnswerImageUpload(letter, file) {
+    if (!file) return
+    setAnsUploading(u => ({ ...u, [letter]: true }))
+    updateDraft(`answer_${letter.toLowerCase()}_image`, await uploadToBucket(file))
+    setAnsUploading(u => ({ ...u, [letter]: false }))
+  }
+
+  function removeAnswerImage(letter) {
+    updateDraft(`answer_${letter.toLowerCase()}_image`, null)
   }
 
   if (!presentation) return (
@@ -333,41 +354,91 @@ export default function SlideEditorPage() {
               fontWeight:700, letterSpacing:'.1em', marginBottom:'.75rem' }}>
               RESPUESTAS — selecciona la letra correcta
             </label>
-            {['A','B','C','D'].map(l => {
+           {['A','B','C','D'].map(l => {
               const field = `answer_${l.toLowerCase()}`
               const isCorrect = draft.correct_answer === l
+              const imgUrl = draft[`answer_${l.toLowerCase()}_image`]
               return (
-                <div key={l} style={{ display:'flex', alignItems:'center', gap:'.5rem', marginBottom:'.5rem' }}>
-                  {/* Letter button = set correct answer */}
-                  <button
-                    onClick={() => updateDraft('correct_answer', isCorrect ? null : l)}
-                    title={isCorrect ? 'Click to unset correct answer' : 'Click to set as correct answer'}
-                    style={{
-                      width:32, height:32, borderRadius:6, flexShrink:0,
-                      border: `2px solid ${ANS_COLORS[l]}`,
-                      background: isCorrect ? ANS_COLORS[l] : 'transparent',
-                      color: isCorrect ? '#fff' : ANS_COLORS[l],
-                      fontWeight:800, fontSize:'.85rem', fontFamily:'var(--mono)',
-                      cursor:'pointer', transition:'all .15s',
-                      display:'flex', alignItems:'center', justifyContent:'center',
-                    }}>
-                    {isCorrect ? '✓' : l}
-                  </button>
-                  <input
-                    value={draft[field]}
-                    onChange={e => updateDraft(field, e.target.value)}
-                    placeholder={`Answer ${l}…`}
-                    style={{
-                      fontSize:'.85rem',
-                      borderColor: isCorrect ? ANS_COLORS[l] : undefined,
-                      boxShadow: isCorrect ? `0 0 0 2px ${ANS_COLORS[l]}33` : undefined,
-                    }}
-                  />
+                <div key={l} style={{ marginBottom:'.6rem' }}>
+                  <div style={{ display:'flex', alignItems:'center', gap:'.5rem' }}>
+                    <button
+                      onClick={() => updateDraft('correct_answer', isCorrect ? null : l)}
+                      title={isCorrect ? 'Click to unset correct answer' : 'Click to set as correct answer'}
+                      style={{
+                        width:32, height:32, borderRadius:6, flexShrink:0,
+                        border: `2px solid ${ANS_COLORS[l]}`,
+                        background: isCorrect ? ANS_COLORS[l] : 'transparent',
+                        color: isCorrect ? '#fff' : ANS_COLORS[l],
+                        fontWeight:800, fontSize:'.85rem', fontFamily:'var(--mono)',
+                        cursor:'pointer', transition:'all .15s',
+                        display:'flex', alignItems:'center', justifyContent:'center',
+                      }}>
+                      {isCorrect ? '✓' : l}
+                    </button>
+                    <input
+                      value={draft[field]}
+                      onChange={e => updateDraft(field, e.target.value)}
+                      placeholder={`Answer ${l}…`}
+                      style={{
+                        fontSize:'.85rem',
+                        borderColor: isCorrect ? ANS_COLORS[l] : undefined,
+                        boxShadow: isCorrect ? `0 0 0 2px ${ANS_COLORS[l]}33` : undefined,
+                      }}
+                    />
+                  </div>
+
+                  {/* Imagen de respuesta (opcional) */}
+                  <div style={{ display:'flex', alignItems:'center', gap:'.5rem', marginTop:'.35rem', marginLeft:'2.5rem' }}>
+                    {imgUrl ? (
+                      <>
+                        <img src={imgUrl} alt={`Answer ${l}`}
+                          style={{ height:34, borderRadius:4, border:'1px solid var(--border)' }}/>
+                        <button className="btn btn-ghost btn-sm" onClick={() => removeAnswerImage(l)}
+                          style={{ fontSize:'.7rem', padding:'.2rem .4rem' }}>
+                          <X size={11}/> Quitar
+                        </button>
+                      </>
+                    ) : (
+                      <label style={{
+                        display:'inline-flex', alignItems:'center', gap:'.3rem',
+                        fontSize:'.7rem', color:'var(--muted)', cursor:'pointer',
+                      }}>
+                        <ImageIcon size={13} style={{ opacity:.6 }}/>
+                        {ansUploading[l] ? 'Subiendo…' : 'Imagen'}
+                        <input type="file" accept="image/*" style={{ display:'none' }}
+                          disabled={ansUploading[l]}
+                          onChange={e => handleAnswerImageUpload(l, e.target.files?.[0])}/>
+                      </label>
+                    )}
+                  </div>
                 </div>
               )
             })}
           </div>
-
+{/* Text size */}
+          <div style={{ padding:'1rem', borderBottom:'1px solid var(--border)' }}>
+            <label style={{ display:'block', fontSize:'.7rem', color:'var(--muted)',
+              fontWeight:700, letterSpacing:'.1em', marginBottom:'.75rem' }}>
+              TAMAÑO DE TEXTO
+            </label>
+            <div style={{ display:'flex', gap:'.4rem' }}>
+              {[['S',0.85],['M',1],['L',1.2],['XL',1.4]].map(([label, val]) => {
+                const active = (draft.text_scale || 1) === val
+                return (
+                  <button key={label} onClick={() => updateDraft('text_scale', val)}
+                    style={{
+                      flex:1, padding:'.4rem 0', borderRadius:6, cursor:'pointer',
+                      fontWeight:700, fontSize:'.8rem',
+                      border: active ? '2px solid var(--accent)' : '1px solid var(--border)',
+                      background: active ? 'rgba(46,157,242,.12)' : 'transparent',
+                      color: active ? 'var(--accent)' : 'var(--text)',
+                    }}>
+                    {label}
+                  </button>
+                )
+              })}
+            </div>
+          </div>
           {/* Image */}
           <div style={{ padding:'1rem', borderBottom:'1px solid var(--border)' }}>
             <label style={{ display:'block', fontSize:'.7rem', color:'var(--muted)',

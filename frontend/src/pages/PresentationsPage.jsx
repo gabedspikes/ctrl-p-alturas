@@ -10,7 +10,8 @@ const CURRENT_YEAR = new Date().getFullYear()
 function PresentationModal({ onClose, onSave, initial }) {
   const { user } = useAuth()
   const [title, setTitle]           = useState(initial?.title || '')
-  const [teacherCourseId, setTeacherCourseId] = useState(initial?.teacher_course_id || '')
+  const [courseId, setCourseId]     = useState(initial?.course_id || '')
+  const [subjectId, setSubjectId]   = useState(initial?.subject_id || '')
   const [assignments, setAssignments] = useState([]) // teacher_courses rows
   const [loading, setLoading]       = useState(true)
 
@@ -23,22 +24,59 @@ function PresentationModal({ onClose, onSave, initial }) {
         .eq('year', CURRENT_YEAR)
         .order('course_id')
 
-      setAssignments(data || [])
-      if (!teacherCourseId && data?.[0]) setTeacherCourseId(data[0].id)
+      const rows = data || []
+      setAssignments(rows)
+
+      // Prefill: en edición usa lo guardado; si no, primer curso (y su materia
+      // si es la única).
+      if (initial?.course_id) {
+        setCourseId(initial.course_id)
+        setSubjectId(initial.subject_id || '')
+      } else if (rows[0]) {
+        setCourseId(rows[0].course_id)
+        const subs = rows.filter(a => a.course_id === rows[0].course_id)
+        if (subs.length === 1) setSubjectId(subs[0].subject_id)
+      }
       setLoading(false)
     }
     load()
   }, [])
 
+  // Cursos únicos (para el primer dropdown)
+  const courses = React.useMemo(() => {
+    const m = new Map()
+    for (const a of assignments) if (!m.has(a.course_id)) m.set(a.course_id, a.courses)
+    return [...m.entries()]   // [ [course_id, {name,...}], ... ]
+  }, [assignments])
+
+  // Materias del curso seleccionado (segundo dropdown, se puebla al elegir curso)
+  const subjectsForCourse = React.useMemo(() => {
+    if (!courseId) return []
+    const m = new Map()
+    for (const a of assignments) {
+      if (a.course_id === courseId && !m.has(a.subject_id)) m.set(a.subject_id, a.subjects)
+    }
+    return [...m.entries()]   // [ [subject_id, {name}], ... ]
+  }, [assignments, courseId])
+
+  function onCourseChange(id) {
+    setCourseId(id)
+    const subs = assignments.filter(a => a.course_id === id)
+    setSubjectId(subs.length === 1 ? subs[0].subject_id : '')  // auto si es única
+  }
+
   async function submit(e) {
     e.preventDefault()
-    const assignment = assignments.find(a => a.id === teacherCourseId)
+    // La fila teacher_courses que corresponde al par curso+materia elegido
+    const assignment = assignments.find(
+      a => a.course_id === courseId && a.subject_id === subjectId
+    )
 
-  const payload = {
+    const payload = {
       title,
-      teacher_course_id: teacherCourseId || null,
-      course_id:  assignment?.course_id  || null,
-      subject_id: assignment?.subject_id || null,
+      teacher_course_id: assignment?.id || null,
+      course_id:  courseId  || null,
+      subject_id: subjectId || null,
       teacher_id: user.id,
     }
 
@@ -69,48 +107,48 @@ function PresentationModal({ onClose, onSave, initial }) {
               />
             </div>
 
-            <div className="form-group">
-              <label>CLASE Y MATERIA</label>
-              {assignments.length === 0 ? (
-                <div style={{
-                  display:'flex', alignItems:'flex-start', gap:'.5rem',
-                  background:'rgba(255,71,87,.08)', border:'1px solid rgba(255,71,87,.25)',
-                  borderRadius:'var(--radius)', padding:'.75rem', fontSize:'.82rem',
-                  color:'var(--danger)', lineHeight:1.5,
-                }}>
-                  <AlertCircle size={16} style={{ flexShrink:0, marginTop:2 }}/>
-                  <span>
-                    No se encontraron tests para {CURRENT_YEAR}.
-                  </span>
-                </div>
-              ) : (
-                <>
-                  <select
-                    value={teacherCourseId}
-                    onChange={e => setTeacherCourseId(e.target.value)}
-                    required
-                  >
-                    <option value="">— Selecciona Curso y Asignatura —</option>
-                    {assignments.map(a => (
-                      <option key={a.id} value={a.id}>
-                        {a.courses?.name} — {a.subjects?.name}
-                      </option>
+            {assignments.length === 0 ? (
+              <p style={{ color:'var(--muted)', fontSize:'.85rem', padding:'.5rem 0' }}>
+                No tienes cursos asignados este año. Contacta a tu administrador para
+                agregar combinaciones de curso y materia.
+              </p>
+            ) : (
+              <>
+                <div className="form-group">
+                  <label>CURSO</label>
+                  <select value={courseId} onChange={e => onCourseChange(e.target.value)} required>
+                    <option value="" disabled>Selecciona un curso…</option>
+                    {courses.map(([id, c]) => (
+                      <option key={id} value={id}>{c?.name || 'Curso'}</option>
                     ))}
                   </select>
-                  <p style={{ fontSize:'.72rem', color:'var(--muted)', marginTop:'.35rem' }}>
-                    Cada opción muestra el curso y la asignatura juntos.
-                    Contacta a tu administrador para agregar combinaciones faltantes.
-                  </p>
-                </>
-              )}
-            </div>
+                </div>
+
+                <div className="form-group">
+                  <label>MATERIA</label>
+                  <select
+                    value={subjectId}
+                    onChange={e => setSubjectId(e.target.value)}
+                    required
+                    disabled={!courseId}
+                  >
+                    <option value="" disabled>
+                      {courseId ? 'Selecciona una materia…' : 'Primero elige un curso'}
+                    </option>
+                    {subjectsForCourse.map(([id, s]) => (
+                      <option key={id} value={id}>{s?.name || 'Materia'}</option>
+                    ))}
+                  </select>
+                </div>
+              </>
+            )}
 
             <div className="modal-footer">
               <button type="button" className="btn btn-ghost" onClick={onClose}>Cancelar</button>
               <button
                 type="submit"
                 className="btn btn-primary"
-                disabled={assignments.length === 0}
+                disabled={!courseId || !subjectId}
               >
                 Save
               </button>
@@ -121,7 +159,6 @@ function PresentationModal({ onClose, onSave, initial }) {
     </div>
   )
 }
-
 // ── Modal: Start Session ─────────────────────────────────
 function StartSessionModal({ presentation, onClose }) {
   const navigate = useNavigate()

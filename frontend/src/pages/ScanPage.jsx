@@ -42,6 +42,8 @@ export default function ScanPage() {
   const [currentSlideId, setCurrentSlideId] = useState(slideId)
   const [sessionEnded, setSessionEnded] = useState(false)
   const [slides, setSlides] = useState([])   // ordered list, for Prev/Next controls
+  const [showList, setShowList] = useState(false)   // lista de alumnos oculta por defecto
+  const [videoAspect, setVideoAspect] = useState(4/3)
 
   const COOLDOWN_MS = 2000
   const CONFIRM_FRAMES = 3   // frames coincidentes antes de registrar
@@ -134,7 +136,11 @@ export default function ScanPage() {
   }
   applySlideChange(newSlideId)
 }
-
+async function finishSession() {
+  if (!confirm('¿Finalizar la sesión para todos? Esto cierra la presentación.')) return
+  await supabase.from('sessions').update({ status: 'finished' }).eq('id', sessionId)
+  // el listener realtime de esta misma página mostrará la pantalla de fin
+}
   // ── Realtime: follow slide changes from laptop (or from this phone) ──
   useEffect(() => {
     const channel = supabase.channel(`scan-session-${sessionId}`)
@@ -375,6 +381,7 @@ if (student && cooled && !alreadyScanned) {
           <span style={{ color: '#2E9DF2', fontWeight: 800, fontSize: '1.2rem' }}>{scannedCount}</span>
           <span style={{ color: '#555', fontSize: '.75rem' }}>/ {totalStudents}</span>
         </div>
+        <button style={styles.finishBtn} onClick={finishSession}>Finalizar</button>
       </div>
 
       {/* Slide navigation — lets the professor advance from the phone too */}
@@ -414,8 +421,11 @@ if (student && cooled && !alreadyScanned) {
       )}
 
       {/* Camera viewfinder */}
-      <div style={styles.viewfinder}>
-        <video ref={videoRef} style={styles.video} playsInline muted autoPlay />
+      <div style={{ ...styles.viewfinder, aspectRatio: String(videoAspect) }}>
+        <video ref={videoRef} style={styles.video} playsInline muted autoPlay
+        onLoadedMetadata={e => {
+        const v = e.currentTarget
+       if (v.videoWidth && v.videoHeight) setVideoAspect(v.videoWidth / v.videoHeight) }}/>
         <canvas ref={canvasRef} style={{ display: 'none' }} />
         <canvas ref={overlayRef} style={styles.overlay} />
 
@@ -444,9 +454,13 @@ if (student && cooled && !alreadyScanned) {
         ))}
       </div>
 
-      {/* Scanned / Pending students */}
-      <div style={styles.studentPanel}>
-        {Object.values(students).map(st => {
+     {/* Toggle de lista (oculta por defecto para dar más espacio al escáner) */}
+      <button style={styles.listToggle} onClick={() => setShowList(v => !v)}>
+      {showList ? '▲ Ocultar alumnos' : `▼ Ver alumnos (${scannedCount}/${totalStudents})`}
+      </button>
+{showList && (
+<div style={styles.studentPanel}>
+  {Object.values(students).map(st => {
           const ans = scanned[st.card_id]
           const correct = slideInfo?.correct_answer
           return (
@@ -464,8 +478,9 @@ if (student && cooled && !alreadyScanned) {
               }
             </div>
           )
-        })}
-      </div>
+       })}
+</div>
+)}
     </div>
   )
 }
@@ -501,7 +516,7 @@ const styles = {
     position: 'relative', width: '100%', aspectRatio: '4/3',
     background: '#000', overflow: 'hidden',
   },
-  video: { width: '100%', height: '100%', objectFit: 'cover', display: 'block' },
+  video: { width: '100%', height: '100%', objectFit: 'contain', display: 'block' },
   overlay: {
     position: 'absolute', inset: 0, width: '100%', height: '100%',
   },
@@ -546,4 +561,14 @@ const styles = {
     minHeight: '100vh', display: 'flex', flexDirection: 'column',
     alignItems: 'center', justifyContent: 'center', background: '#0d0d0f',
   },
+  finishBtn: {
+  background: 'transparent', border: '1px solid #ff4757', color: '#ff4757',
+  borderRadius: 6, padding: '.3rem .55rem', fontSize: '.7rem', fontWeight: 700,
+  cursor: 'pointer', whiteSpace: 'nowrap',
+},
+listToggle: {
+  width: '100%', background: '#141417', border: 'none',
+  borderBottom: '1px solid #2a2a30', color: '#e8e8ec',
+  padding: '.5rem 1rem', fontSize: '.75rem', cursor: 'pointer',
+},
 }

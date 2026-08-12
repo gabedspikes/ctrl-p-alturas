@@ -41,20 +41,21 @@ export default function SlideRenderer({
   const textColor = dark ? '#e8e8ec' : '#1a1a2e'
   const mutedColor = dark ? 'rgba(255,255,255,0.4)' : 'rgba(0,0,0,0.35)'
   const scale = width / 720
+  const textScale = slide.text_scale || 1
 
   const answers = [
-    { letter: 'A', text: slide.answer_a },
-    { letter: 'B', text: slide.answer_b },
-    { letter: 'C', text: slide.answer_c },
-    { letter: 'D', text: slide.answer_d },
+    { letter: 'A', text: slide.answer_a, image: slide.answer_a_image },
+    { letter: 'B', text: slide.answer_b, image: slide.answer_b_image },
+    { letter: 'C', text: slide.answer_c, image: slide.answer_c_image },
+    { letter: 'D', text: slide.answer_d, image: slide.answer_d_image },
   ]
 
-  const hasAnswers = answers.some(a => a.text)
+  const hasAnswers = answers.some(a => a.text || a.image)
   const hasImage = !!slide.image_url
   const hasQuestion = !!slide.question_text
 
-  const qFontSize = compact ? 11 : Math.max(14, Math.min(28, 28 - (slide.question_text?.length || 0) * 0.15))
-  const aFontSize = compact ? 9 : 13
+  const qFontSize = (compact ? 11 : Math.max(14, Math.min(28, 28 - (slide.question_text?.length || 0) * 0.15))) * textScale
+  const aFontSize = (compact ? 9 : 13) * textScale
 
   return (
     <div style={{
@@ -129,8 +130,8 @@ export default function SlideRenderer({
           flexDirection: 'column',
           gap: compact ? 3 : Math.max(4, 8*scale),
         }}>
-          {answers.map(({ letter, text }) => {
-            if (!text && !compact) return null
+          {answers.map(({ letter, text, image }) => {
+            if (!text && !image && !compact) return null
             const col = ANS_COLORS[letter]
             const isCorrect = showCorrect && slide.correct_answer === letter
             return (
@@ -165,6 +166,20 @@ export default function SlideRenderer({
                     <span style={{ position:'absolute', fontSize: 10 }}>✓</span>
                   )}
                 </div>
+                {/* Answer image (optional) */}
+                {image && (
+                  <img
+                    src={image}
+                    alt={`Answer ${letter}`}
+                    style={{
+                      height: compact ? 22 : Math.max(34, 46*scale),
+                      maxWidth: '45%',
+                      objectFit: 'contain',
+                      borderRadius: 4,
+                      flexShrink: 0,
+                    }}
+                  />
+                )}{text || (image ? '' : (compact ? '' : `Answer ${letter}`))}
                 {/* Answer text */}
                 <span style={{
                   color: text ? textColor : mutedColor,
