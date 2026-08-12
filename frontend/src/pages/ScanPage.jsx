@@ -138,8 +138,9 @@ export default function ScanPage() {
 }
 async function finishSession() {
   if (!confirm('¿Finalizar la sesión para todos? Esto cierra la presentación.')) return
-  await supabase.from('sessions').update({ status: 'finished' }).eq('id', sessionId)
-  // el listener realtime de esta misma página mostrará la pantalla de fin
+  await supabase.from('sessions')
+    .update({ status: 'finished', finished_at: new Date().toISOString() })
+    .eq('id', sessionId)
 }
   // ── Realtime: follow slide changes from laptop (or from this phone) ──
   useEffect(() => {

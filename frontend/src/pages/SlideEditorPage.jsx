@@ -175,10 +175,13 @@ export default function SlideEditorPage() {
   }
 
   // ── Image upload (shared) ────────────────────────────────
-  async function uploadToBucket(file) {
+ async function uploadToBucket(file) {
     const path = `slides/${presentationId}/${Date.now()}_${file.name.replace(/\s/g,'_')}`
     const { error } = await supabase.storage.from('slide-images').upload(path, file)
-    if (error) return URL.createObjectURL(file)   // fallback local (no persiste tras recargar)
+    if (error) {
+      alert('No se pudo subir la imagen. Revisa tu conexión e intenta de nuevo.')
+      return null
+    }
     const { data } = supabase.storage.from('slide-images').getPublicUrl(path)
     return data.publicUrl
   }

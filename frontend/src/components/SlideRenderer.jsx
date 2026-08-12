@@ -137,8 +137,7 @@ export default function SlideRenderer({
             const isCorrect = showCorrect && slide.correct_answer === letter
             return (
               <div key={letter} style={{
-                display: 'flex',
-                alignItems: 'center',
+                display: 'flex', alignItems: 'center',
                 gap: compact ? 5 : Math.max(6, 10*scale),
                 background: isCorrect ? col.bg : dark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.04)',
                 border: `${compact ? 1 : 1.5}px solid ${isCorrect ? col.border : dark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)'}`,
@@ -153,35 +152,23 @@ export default function SlideRenderer({
                   borderRadius: 4,
                   background: isCorrect ? col.border : 'transparent',
                   border: `2px solid ${col.border}`,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
                   flexShrink: 0,
                   fontSize: compact ? 9 : Math.max(11, 13*scale),
                   fontWeight: 800,
                   color: isCorrect ? '#fff' : col.label,
                   fontFamily: "'DM Mono', monospace",
-                }}>
-                  {letter}
-                  {isCorrect && !compact && (
-                    <span style={{ position:'absolute', fontSize: 10 }}>✓</span>
-                  )}
-                </div>
+                }}>{letter}</div>
+
                 {/* Answer image (optional) */}
                 {image && (
-                  <img
-                    src={image}
-                    alt={`Answer ${letter}`}
-                    style={{
-                      height: compact ? 22 : Math.max(34, 46*scale),
-                      maxWidth: '45%',
-                      objectFit: 'contain',
-                      borderRadius: 4,
-                      flexShrink: 0,
-                    }}
-                  />
-                )}{text || (image ? '' : (compact ? '' : `Answer ${letter}`))}
-                {/* Answer text */}
+                  <img src={image} alt="" style={{
+                    flex: 1, minHeight: 0, maxWidth: '100%',
+                    objectFit: 'contain', borderRadius: 4,
+                  }}/>
+                )}
+
+                {/* Answer text (una sola vez) */}
                 <span style={{
                   color: text ? textColor : mutedColor,
                   fontSize: aFontSize,
@@ -189,32 +176,29 @@ export default function SlideRenderer({
                   fontWeight: isCorrect ? 600 : 400,
                   lineHeight: 1.3,
                 }}>
-                  {text || (compact ? '' : `Answer ${letter}`)}
+                  {text || (image ? '' : (compact ? '' : `Answer ${letter}`))}
                 </span>
-                {/* Live percentage for this option (session view only) */}
+
+                {/* Live percentage */}
                 {tally && (
                   <div style={{
-                    marginLeft: 'auto',
-                    flexShrink: 0,
+                    marginLeft: 'auto', flexShrink: 0,
                     fontFamily: "'JetBrains Mono', monospace",
                     fontSize: compact ? 10 : Math.max(12, 15*scale),
-                    fontWeight: 700,
-                    color: col.border,
-                    minWidth: compact ? 34 : 52,
-                    textAlign: 'right',
+                    fontWeight: 700, color: col.border,
+                    minWidth: compact ? 34 : 52, textAlign: 'right',
                   }}>
                     {totalStudents ? Math.round((tally[letter] || 0) / totalStudents * 100) : 0}%
                     <span style={{
                       fontSize: compact ? 8 : Math.max(9, 11*scale),
                       color: mutedColor, marginLeft: 3, fontWeight: 400,
-                    }}>
-                      ({tally[letter] || 0})
-                    </span>
+                    }}> ({tally[letter] || 0})</span>
                   </div>
                 )}
+
                 {/* Correct checkmark */}
                 {isCorrect && !compact && (
-                  <span style={{ marginLeft: 'auto', color: col.border, fontSize: 16, fontWeight: 800 }}>✓</span>
+                  <span style={{ marginLeft: tally ? 6 : 'auto', color: col.border, fontSize: 16, fontWeight: 800 }}>✓</span>
                 )}
               </div>
             )

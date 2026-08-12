@@ -135,6 +135,10 @@ export default function SessionPage() {
         event: 'UPDATE', schema: 'public', table: 'sessions',
         filter: `id=eq.${sessionId}`
       }, payload => {
+        // Finalización desde el teléfono → reflejar el estado aquí también
+        if (payload.new.status === 'finished') {
+          setSession(prev => prev ? { ...prev, status: 'finished', finished_at: payload.new.finished_at } : prev)
+        }
         const newSlideId = payload.new.current_slide_id
         if (newSlideId) {
           const idx = slides.findIndex(s => s.id === newSlideId)
