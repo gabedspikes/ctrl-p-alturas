@@ -2,6 +2,8 @@ import React from 'react'
 import ReactDOM from 'react-dom/client'
 import { BrowserRouter, Routes, Route, NavLink, Navigate, useLocation } from 'react-router-dom'
 import { AuthProvider, useAuth } from './lib/auth'
+import { useIsMobile } from './lib/useIsMobile'
+import { useIsPWA } from './lib/useIsPWA'
 import AuthPage from './pages/AuthPage'
 import CoursesPage from './pages/CoursesPage'
 import PresentationsPage from './pages/PresentationsPage'
@@ -71,20 +73,34 @@ function Layout({ children }) {
   )
 }
 
-// ── Router decides whether to wrap with auth ──────────────
+// ── Router ────────────────────────────────────────────────
 function AppRoutes() {
+  // PWA instalada en un teléfono → "modo escáner": la app solo escanea y
+  // controla las slides. El mismo teléfono en el navegador normal, o el
+  // computador (aunque tenga la PWA), siguen viendo la app completa.
+  const scannerMode = useIsMobile() && useIsPWA()
+
   return (
     <AuthProvider>
-      <Routes>
-        <Route path="/auth" element={<AuthGate />} />
-        <Route path="/scan" element={<Protected><Layout><ScanEntryPage /></Layout></Protected>} />
-        <Route path="/scan/:sessionId" element={<Protected><ScanPage /></Protected>} />
-        <Route path="/" element={<Protected><Layout><CoursesPage /></Layout></Protected>} />
-        <Route path="/presentations" element={<Protected><Layout><PresentationsPage /></Layout></Protected>} />
-        <Route path="/presentations/:id/edit" element={<Protected><SlideEditorPage /></Protected>} />
-        <Route path="/sessions/:id" element={<Protected><SessionPage /></Protected>} />
-        <Route path="/cards" element={<Protected><CardGeneratorPage /></Protected>} />
-      </Routes>
+      {scannerMode ? (
+        <Routes>
+          <Route path="/auth" element={<AuthGate />} />
+          <Route path="/scan" element={<Protected><ScanEntryPage /></Protected>} />
+          <Route path="/scan/:sessionId" element={<Protected><ScanPage /></Protected>} />
+          <Route path="*" element={<Navigate to="/scan" replace />} />
+        </Routes>
+      ) : (
+        <Routes>
+          <Route path="/auth" element={<AuthGate />} />
+          <Route path="/scan" element={<Protected><Layout><ScanEntryPage /></Layout></Protected>} />
+          <Route path="/scan/:sessionId" element={<Protected><ScanPage /></Protected>} />
+          <Route path="/" element={<Protected><Layout><CoursesPage /></Layout></Protected>} />
+          <Route path="/presentations" element={<Protected><Layout><PresentationsPage /></Layout></Protected>} />
+          <Route path="/presentations/:id/edit" element={<Protected><SlideEditorPage /></Protected>} />
+          <Route path="/sessions/:id" element={<Protected><SessionPage /></Protected>} />
+          <Route path="/cards" element={<Protected><CardGeneratorPage /></Protected>} />
+        </Routes>
+      )}
     </AuthProvider>
   )
 }
@@ -96,6 +112,7 @@ function AuthGate() {
   if (user) return <Navigate to={dest} replace />
   return <AuthPage />
 }
+
 ReactDOM.createRoot(document.getElementById('root')).render(
   <BrowserRouter>
     <AppRoutes />

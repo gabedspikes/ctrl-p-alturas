@@ -48,6 +48,17 @@ export default function ScanPage() {
   const COOLDOWN_MS = 2000
   const CONFIRM_FRAMES = 3   // frames coincidentes antes de registrar
 
+// Presencia: avisa al computador que este teléfono se conectó a la sesión.
+useEffect(() => {
+  if (status !== 'ready') return
+  const ch = supabase.channel(`presence-session-${sessionId}`, {
+    config: { presence: { key: `scanner-${Math.random().toString(36).slice(2)}` } },
+  })
+  ch.subscribe(async s => {
+    if (s === 'SUBSCRIBED') await ch.track({ role: 'scanner' })
+  })
+  return () => { supabase.removeChannel(ch) }
+}, [sessionId, status])
   // ── Load session + students + slide ─────────────────────
   useEffect(() => {
     async function load() {

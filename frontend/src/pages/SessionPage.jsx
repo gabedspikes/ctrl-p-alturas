@@ -7,7 +7,7 @@ import SlideRenderer from '../components/SlideRenderer'
 import QRCode from 'qrcode'
 
 // ── Código de sesión (para escanear desde el móvil) ──────
-function ScanCodeModal({ scanCode, onClose }) {
+function ScanCodeModal({ scanCode, connected = false, onClose }) {
   const pretty = scanCode ? `${scanCode.slice(0, 3)} ${scanCode.slice(3)}` : '––– –––'
 
   return (
@@ -23,14 +23,24 @@ function ScanCodeModal({ scanCode, onClose }) {
           fontSize: '2.75rem', fontWeight: 700, fontFamily: 'monospace',
           letterSpacing: '.35rem', color: 'var(--accent)',
           background: 'var(--bg)', border: '2px solid var(--accent)',
-          borderRadius: 12, padding: '1rem', marginBottom: '1.25rem',
+          borderRadius: 12, padding: '1rem', marginBottom: '1rem',
         }}>
           {pretty}
         </div>
 
-        <p style={{ fontSize: '.75rem', color: 'var(--muted)', marginBottom: '1.25rem' }}>
-          El código funciona mientras la sesión esté en vivo y sirve en el navegador o en la PWA instalada.
-        </p>
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '.5rem',
+          fontSize: '.85rem', fontWeight: 600, marginBottom: '1.25rem',
+          color: connected ? 'var(--success)' : 'var(--muted)',
+        }}>
+          <span style={{
+            width: 8, height: 8, borderRadius: '50%',
+            background: connected ? 'var(--success)' : 'var(--muted)',
+            boxShadow: connected ? '0 0 0 4px rgba(46,213,115,.2)' : 'none',
+          }}/>
+          {connected ? 'Teléfono conectado' : 'Esperando conexión del teléfono…'}
+        </div>
+
         <button className="btn btn-ghost" onClick={onClose}>Cerrar</button>
       </div>
     </div>
@@ -49,6 +59,8 @@ export default function SessionPage() {
   const [showQR, setShowQR]           = useState(false)
   const [showStats, setShowStats]     = useState(true)   // live % overlay, per session
   const [showResults, setShowResults] = useState(false)  // final results reveal, hidden by default
+  const [scannerConnected, setScannerConnected] = useState(false)
+  const autoOpenedRef = useRef(false)
 
   // Measure the slide stage to keep the slide big but proportional (16:9)
   const stageRef = useRef(null)
@@ -118,6 +130,34 @@ export default function SessionPage() {
     }
     load()
   }, [sessionId])
+  // Al comenzar la sesión, abre el código automáticamente (una sola vez).
+useEffect(() => {
+  if (session?.status === 'active' && !autoOpenedRef.current) {
+    autoOpenedRef.current = true
+    setShowQR(true)
+  }
+}, [session])
+
+// Cuando el teléfono se conecta, cierra el código solo.
+useEffect(() => {
+  if (scannerConnected) setShowQR(false)
+}, [scannerConnected])
+
+// Presencia: detecta cuándo un teléfono entra al escáner de esta sesión.
+useEffect(() => {
+  const ch = supabase.channel(`presence-session-${sessionId}`, {
+    config: { presence: { key: 'computer' } },
+  })
+  ch.on('presence', { event: 'sync' }, () => {
+    const state = ch.presenceState()
+    const hayScanner = Object.values(state).flat().some(p => p.role === 'scanner')
+    setScannerConnected(hayScanner)
+  })
+  ch.subscribe(async s => {
+    if (s === 'SUBSCRIBED') await ch.track({ role: 'computer' })
+  })
+  return () => { supabase.removeChannel(ch) }
+}, [sessionId])
 
   // Realtime: keeps in sync with the phone scanner in both directions —
   // new responses (INSERT) coming from a scan, and slide changes (UPDATE)
@@ -310,7 +350,7 @@ export default function SessionPage() {
         </div>
       </div>
 
-      {showQR && <ScanCodeModal scanCode={session?.scan_code} onClose={() => setShowQR(false)} />}
+      {showQR && <ScanCodeModal scanCode={session?.scan_code} connected={scannerConnected} onClose={() => setShowQR(false)} />}
     </div>
   )
 }
