@@ -5,25 +5,30 @@ import { MARKERS } from '../lib/markers.js'
 import { supabase } from '../lib/supabase'
 
 // ── Single card SVG ───────────────────────────────────────
-function Card({ id, studentName, rut, cardSize = 200 }) {
+// El nombre del alumno YA NO se dibuja dentro del SVG: se imprime grande
+// debajo de la tarjeta (ver triggerPrint) y ya se muestra en la grilla de
+// pantalla. El SVG solo lleva el marcador, las letras A/B/C/D y el número.
+function Card({ id, cardSize = 200 }) {
   const bits = MARKERS[id]
+  const total = cardSize
+
   if (!bits) return (
-    <svg width={cardSize} height={cardSize}
+    <svg width={total} height={total} viewBox={`0 0 ${total} ${total}`}
+      xmlns="http://www.w3.org/2000/svg"
       style={{ display:'block', border:'2px dashed #ccc', borderRadius:8 }}>
-      <rect width={cardSize} height={cardSize} fill="#f5f5f5"/>
-      <text x={cardSize/2} y={cardSize/2} textAnchor="middle"
+      <rect width={total} height={total} fill="#f5f5f5"/>
+      <text x={total/2} y={total/2} textAnchor="middle"
         fontSize={14} fill="#aaa" fontFamily="monospace">
         No pattern for #{id}
       </text>
     </svg>
   )
 
-  const pad = 28
+  const pad = Math.round(cardSize * 0.10)   // margen para que las letras respiren
   const markerPx = cardSize - pad * 2
   const cell = markerPx / 7
-  const total = cardSize
   const mid = total / 2
-  const labelSize = Math.max(11, Math.floor(cardSize * 0.07))
+  const labelSize = Math.max(13, Math.floor(cardSize * 0.075))
 
   const cells = []
   for (let r = 0; r < 7; r++) {
@@ -42,55 +47,76 @@ function Card({ id, studentName, rut, cardSize = 200 }) {
   }
 
   return (
-    <svg width={total} height={total} xmlns="http://www.w3.org/2000/svg"
+    <svg width={total} height={total} viewBox={`0 0 ${total} ${total}`}
+      xmlns="http://www.w3.org/2000/svg"
       style={{ display:'block', border:'2px solid #000', borderRadius:8 }}>
       <rect width={total} height={total} fill="#fff" rx="7"/>
       <rect x="2" y="2" width={total-4} height={total-4}
         fill="none" stroke="#000" strokeWidth="2.5" rx="5"/>
       {cells}
-      <text x={mid} y={labelSize+2} textAnchor="middle"
+
+      {/* Etiquetas de orientación, centradas en el margen de cada lado
+          (antes B y D quedaban recortadas por el borde) */}
+      <text x={mid} y={Math.round(pad*0.80)} textAnchor="middle"
         fontSize={labelSize} fontWeight="bold" fontFamily="Arial" fill="#1a7a1a">A</text>
-      <text x={mid} y={total-3} textAnchor="middle"
+      <text x={mid} y={total - Math.round(pad*0.32)} textAnchor="middle"
         fontSize={labelSize} fontWeight="bold" fontFamily="Arial" fill="#c87000">C</text>
-      <text x={total-3} y={mid+labelSize/3} textAnchor="middle"
+      <text x={total - Math.round(pad*0.5)} y={mid + labelSize*0.35} textAnchor="middle"
         fontSize={labelSize} fontWeight="bold" fontFamily="Arial" fill="#1a4a9a">B</text>
-      <text x={3} y={mid+labelSize/3} textAnchor="middle"
+      <text x={Math.round(pad*0.5)} y={mid + labelSize*0.35} textAnchor="middle"
         fontSize={labelSize} fontWeight="bold" fontFamily="Arial" fill="#9a1a1a">D</text>
-      <text x={6} y={11} fontSize={8} fontFamily="monospace" fill="#aaa">{id}</text>
-      <text x={total-6} y={11} textAnchor="end" fontSize={8} fontFamily="monospace" fill="#aaa">{id}</text>
-      {studentName && (
-        <text x={mid} y={total-13} textAnchor="middle"
-          fontSize={Math.max(8, Math.floor(cardSize*0.055))}
-          fontFamily="Arial" fill="#333">{studentName}</text>
-      )}
-      {rut && (
-        <text x={mid} y={total-3} textAnchor="middle"
-          fontSize={7} fontFamily="monospace" fill="#888">{rut}</text>
-      )}
+
+      {/* Número de tarjeta en las esquinas superiores */}
+      <text x={6} y={13} fontSize={9} fontFamily="monospace" fill="#bbb">{id}</text>
+      <text x={total-6} y={13} textAnchor="end" fontSize={9} fontFamily="monospace" fill="#bbb">{id}</text>
     </svg>
   )
 }
 
-// ── Print helper ──────────────────────────────────────────
-function triggerPrint(svgElements, title) {
+// ── Print helper — 2 tarjetas por hoja carta, nombre grande abajo ──
+function triggerPrint(items, title) {
   const win = window.open('', '_blank')
+
+  // Agrupar de a 2 por página
+  const pages = []
+  for (let i = 0; i < items.length; i += 2) pages.push(items.slice(i, i + 2))
+
+  const pagesHtml = pages.map(pair => `
+    <div class="page">
+      ${pair.map(it => `
+        <div class="card-wrap">
+          <div class="card-svg">${it.svg}</div>
+          <div class="hint">A↑ B→ C↓ D← · rotar para que la respuesta esté arriba</div>
+          <div class="name">${it.name || `Tarjeta #${it.id}`}</div>
+          ${it.rut ? `<div class="rut">${it.rut}</div>` : ''}
+        </div>`).join('')}
+    </div>`).join('')
+
   win.document.write(`<!DOCTYPE html><html><head><title>${title}</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { background: white; font-family: Arial, sans-serif; }
-    .grid { display: flex; flex-wrap: wrap; gap: 16px; padding: 16px; justify-content: flex-start; }
-    .card-wrap svg { width: 340px !important; height: 340px !important; }
-    .card-wrap { page-break-inside: avoid; display: flex; flex-direction: column; align-items: center; gap: 3px; }
-    .hint { font-size: 8px; color: #888; text-align: center; }
-    @media print { .grid { gap: 6px; padding: 8px; } }
+    .page {
+      height: 100vh;
+      display: flex; flex-direction: column;
+      justify-content: space-evenly; align-items: center;
+      padding: 0.4in;
+      page-break-after: always;
+    }
+    .page:last-child { page-break-after: auto; }
+    .card-wrap {
+      display: flex; flex-direction: column; align-items: center; gap: 8px;
+      page-break-inside: avoid;
+    }
+    .card-svg svg { width: 4in !important; height: 4in !important; }
+    .hint { font-size: 10px; color: #888; }
+    .name { font-size: 26px; font-weight: bold; color: #111; text-align: center; margin-top: 4px; }
+    .rut  { font-size: 13px; color: #666; font-family: monospace; }
+    @media print {
+      @page { size: letter portrait; margin: 0; }
+    }
   </style></head><body>
-  <div class="grid">
-    ${svgElements.map(s => `
-      <div class="card-wrap">
-        ${s}
-        <div class="hint">A↑ B→ C↓ D← · rotar para que la respuesta este arriba</div>
-      </div>`).join('')}
-  </div>
+    ${pagesHtml}
   <script>window.onload = () => setTimeout(() => window.print(), 400)</script>
   </body></html>`)
   win.document.close()
@@ -153,11 +179,13 @@ export default function CardGeneratorPage() {
     : availableIds.map(id => ({ id, name: null, rut: null }))
 
   function printCards() {
-    const svgs = printRef.current.querySelectorAll('svg')
+    const svgs = Array.from(printRef.current.querySelectorAll('svg')).map(s => s.outerHTML)
     const title = selectedCourse
       ? `Tarjetas — ${courses.find(c => c.id === selectedCourse)?.name || 'Cursos'}`
       : 'Todas las tarjetas'
-    triggerPrint(Array.from(svgs).map(s => s.outerHTML), title)
+    // Emparejar cada SVG con el nombre/RUT de su tarjeta (mismo orden que cardsToShow)
+    const items = cardsToShow.map((c, i) => ({ svg: svgs[i], name: c.name, rut: c.rut, id: c.id }))
+    triggerPrint(items, title)
   }
 
   const courseName = courses.find(c => c.id === selectedCourse)?.name
@@ -169,14 +197,14 @@ export default function CardGeneratorPage() {
         {/* Header */}
         <div style={{ display:'flex', alignItems:'center', gap:'1rem', marginBottom:'1.5rem', flexWrap:'wrap' }}>
           <button className="btn btn-ghost btn-sm" onClick={() => navigate('/')}>
-            <ArrowLeft size={14}/> Back
+            <ArrowLeft size={14}/> Atras
           </button>
           <div style={{ flex:1 }}>
-            <h1>Student Cards</h1>
+            <h1>Tarjetas</h1>
             <p style={{ color:'var(--muted)', fontSize:'.85rem', marginTop:'.2rem' }}>
               {selectedCourse && students.length > 0
-                ? `Mostrando ${students.length} trajetas para ${courseName}`
-                : `Mostrando las ${availableIds.length} trajetas disponibles`}
+                ? `Mostrando ${students.length} tarjetas para ${courseName}`
+                : `Mostrando las ${availableIds.length} tarjetas disponibles`}
             </p>
           </div>
           <button className="btn btn-primary" onClick={printCards}>
@@ -222,7 +250,7 @@ export default function CardGeneratorPage() {
 
         {/* Card grid */}
         {loading ? (
-          <p style={{ color:'var(--muted)', padding:'2rem' }}>Loading students…</p>
+          <p style={{ color:'var(--muted)', padding:'2rem' }}>Cargando alumnos…</p>
         ) : (
           <div ref={printRef} style={{
             display:'grid',
@@ -235,10 +263,10 @@ export default function CardGeneratorPage() {
                 padding:'.75rem', background:'var(--surface)',
                 border:'1px solid var(--border)', borderRadius:8
               }}>
-                <Card id={id} studentName={name} rut={rut} cardSize={360}/>
+                <Card id={id} cardSize={360}/>
                 <div style={{ textAlign:'center' }}>
                   <div style={{ fontSize:'.75rem', color:'var(--muted)', fontFamily:'var(--mono)' }}>
-                    Card #{id}
+                    Tarjeta #{id}
                   </div>
                   {name && (
                     <div style={{ fontSize:'.8rem', color:'var(--text)', fontWeight:600, marginTop:'.15rem' }}>
