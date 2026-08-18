@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import SlideRenderer from '../components/SlideRenderer'
 import { ArrowLeft, Plus, Trash2, ImageIcon, Save, X } from 'lucide-react'
+import imageCompression from 'browser-image-compression'
 
 const ANS_COLORS = { A:'#22c55e', B:'#3b82f6', C:'#f97316', D:'#ef4444' }
 
@@ -175,9 +176,37 @@ export default function SlideEditorPage() {
   }
 
   // ── Image upload (shared) ────────────────────────────────
- async function uploadToBucket(file) {
-    const path = `slides/${presentationId}/${Date.now()}_${file.name.replace(/\s/g,'_')}`
-    const { error } = await supabase.storage.from('slide-images').upload(path, file)
+  async function uploadToBucket(file) {
+    // Comprimir en el navegador antes de subir. Reduce el peso 5–15× sin
+    // pérdida visible: redimensiona a máx 1600px y re-encoda con calidad ~0.8.
+    // Los SVG y GIF se dejan pasar tal cual (comprimirlos los rompe/anima mal).
+    let toUpload = file
+    const skip = /svg|gif/i.test(file.type)
+    if (!skip) {
+      try {
+        toUpload = await imageCompression(file, {
+          maxSizeMB: 0.5,
+          maxWidthOrHeight: 1600,
+          useWebWorker: true,
+          initialQuality: 0.8,
+          fileType: 'image/webp',
+        })
+      } catch (err) {
+        console.warn('Compresión falló, se sube el original:', err)
+        toUpload = file
+      }
+    }
+
+    // La extensión debe reflejar el tipo final (webp tras comprimir).
+    const ext = skip
+      ? file.name.split('.').pop()
+      : (toUpload.type.split('/')[1] || 'webp')
+    const base = file.name.replace(/\.[^.]+$/, '').replace(/\s/g, '_')
+    const path = `slides/${presentationId}/${Date.now()}_${base}.${ext}`
+
+    const { error } = await supabase.storage
+      .from('slide-images')
+      .upload(path, toUpload, { contentType: toUpload.type })
     if (error) {
       alert('No se pudo subir la imagen. Revisa tu conexión e intenta de nuevo.')
       return null
