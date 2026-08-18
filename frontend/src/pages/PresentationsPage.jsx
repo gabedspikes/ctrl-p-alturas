@@ -237,8 +237,16 @@ export default function PresentationsPage() {
     setPresentations(data || [])
   }
 
+
   async function deletePresentation(id) {
     if (!confirm('Delete this test and all its slides?')) return
+    // Borrar todas las imágenes del bucket bajo la carpeta de este test
+    const { data: files } = await supabase.storage
+      .from('slide-images').list(`slides/${id}`)
+    if (files?.length) {
+      await supabase.storage.from('slide-images')
+        .remove(files.map(f => `slides/${id}/${f.name}`))
+    }
     await supabase.from('presentations').delete().eq('id', id)
     load()
   }

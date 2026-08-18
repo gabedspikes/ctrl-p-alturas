@@ -164,10 +164,15 @@ export default function SlideEditorPage() {
     loadDraft(newSlide)
   }
 
-  async function deleteSlide(idx) {
+ async function deleteSlide(idx) {
     if (slides.length === 1) return alert("Can't delete the last slide.")
     if (!confirm('Delete this slide?')) return
-    await supabase.from('slides').delete().eq('id', slides[idx].id)
+    const s = slides[idx]
+    // Recoge todas las imágenes de la slide y bórralas del bucket
+    const urls = [s.image_url, s.answer_a_image, s.answer_b_image,
+                  s.answer_c_image, s.answer_d_image].filter(Boolean)
+    await Promise.all(urls.map(deleteFromBucket))
+    await supabase.from('slides').delete().eq('id', s.id)
     const remaining = slides.filter((_, i) => i !== idx)
     setSlides(remaining)
     const newIdx = Math.min(idx, remaining.length - 1)
@@ -214,16 +219,33 @@ export default function SlideEditorPage() {
     const { data } = supabase.storage.from('slide-images').getPublicUrl(path)
     return data.publicUrl
   }
+// ── Borrar imagen del bucket a partir de su URL pública ──
+  // Convierte la URL pública en la ruta interna que espera storage.remove().
+  // Silenciosa a propósito: si falla el borrado del archivo, no queremos
+  // bloquear la edición de la slide — a lo sumo queda un huérfano.
+  async function deleteFromBucket(publicUrl) {
+    if (!publicUrl) return
+    const marker = '/slide-images/'
+    const idx = publicUrl.indexOf(marker)
+    if (idx === -1) return
+    const path = publicUrl.slice(idx + marker.length)
+    const { error } = await supabase.storage.from('slide-images').remove([path])
+    if (error) console.warn('No se pudo borrar la imagen huérfana:', path, error)
+  }
 
-  async function handleImageUpload(e) {
+ async function handleImageUpload(e) {
     const file = e.target.files?.[0]
     if (!file) return
     setUploading(true)
-    updateDraft('image_url', await uploadToBucket(file))
+    const old = draftRef.current.image_url
+    const url = await uploadToBucket(file)
+    if (url && old) await deleteFromBucket(old)   // limpia la anterior solo si la nueva subió
+    updateDraft('image_url', url)
     setUploading(false)
   }
 
-  function removeImage() {
+async function removeImage() {
+    await deleteFromBucket(draftRef.current.image_url)
     updateDraft('image_url', null)
   }
 
@@ -231,17 +253,20 @@ export default function SlideEditorPage() {
     if (!file) return
     const l = letter.toLowerCase()
     setAnsUploading(u => ({ ...u, [letter]: true }))
+    const old = draftRef.current[`answer_${l}_image`]
     const url = await uploadToBucket(file)
+    if (url && old) await deleteFromBucket(old)
     updateDraft(`answer_${l}_image`, url)
-    // Asegura que siempre haya texto descriptivo; el profe lo reemplaza.
     if (!draftRef.current[`answer_${l}`]) {
       updateDraft(`answer_${l}`, 'Porfavor agregar un texto descriptivo de la imagen')
     }
     setAnsUploading(u => ({ ...u, [letter]: false }))
   }
 
-  function removeAnswerImage(letter) {
-    updateDraft(`answer_${letter.toLowerCase()}_image`, null)
+ async function removeAnswerImage(letter) {
+    const l = letter.toLowerCase()
+    await deleteFromBucket(draftRef.current[`answer_${l}_image`])
+    updateDraft(`answer_${l}_image`, null)
   }
 
   if (!presentation) return (
