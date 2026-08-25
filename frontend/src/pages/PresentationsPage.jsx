@@ -198,7 +198,7 @@ function StartSessionModal({ presentation, onClose }) {
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal" onClick={e => e.stopPropagation()}>
-        <h2>Start Session</h2>
+        <h2>Comenzar Sesión</h2>
         <p style={{ color:'var(--muted)', fontSize:'.875rem', marginBottom:'1.5rem' }}>
           Launch <strong style={{ color:'var(--text)' }}>{presentation.title}</strong> as a live session.
           Los estudiantes responderán usando sus tarjetas impresas.
@@ -237,19 +237,78 @@ export default function PresentationsPage() {
     setPresentations(data || [])
   }
 
+async function deletePresentation(id) {
+  // 1. Traer las sesiones de este test, con su estado y si están archivadas.
+  const { data: sessions, error } = await supabase
+    .from('sessions')
+    .select('id, status, finished_at, archived_at')
+    .eq('presentation_id', id)
 
-  async function deletePresentation(id) {
-    if (!confirm('Delete this test and all its slides?')) return
-    // Borrar todas las imágenes del bucket bajo la carpeta de este test
-    const { data: files } = await supabase.storage
-      .from('slide-images').list(`slides/${id}`)
-    if (files?.length) {
-      await supabase.storage.from('slide-images')
-        .remove(files.map(f => `slides/${id}/${f.name}`))
-    }
-    await supabase.from('presentations').delete().eq('id', id)
-    load()
+  if (error) {
+    alert('No se pudo verificar el estado del test. Intenta de nuevo.')
+    return
   }
+
+  const total       = sessions?.length || 0
+  const finished     = (sessions || []).filter(s => s.status === 'finished')
+  // Terminadas pero todavía NO copiadas a Plickers: son las que se perderían.
+  const sinArchivar  = finished.filter(s => !s.archived_at)
+  const activas       = (sessions || []).filter(s => s.status === 'active')
+
+  // 2. Armar el mensaje de confirmación según el caso.
+  let mensaje
+
+  if (total === 0) {
+    // Sin sesiones: borrar solo elimina el slides y sus diapositivas. Bajo riesgo.
+    mensaje = '¿Eliminar este slides y todas sus diapositivas?\n\n' +
+              'Este slides no tiene sesiones registradas.'
+  } else if (sinArchivar.length > 0) {
+    // CASO CRÍTICO: hay resultados de evaluación que aún no se guardaron.
+    mensaje =
+      '⚠ ATENCIÓN — Este slides tiene datos que NO se han guardado en el histórico.\n\n' +
+      `Sesiones terminadas sin archivar: ${sinArchivar.length}\n` +
+      (activas.length > 0 ? `Sesiones aún activas (sin terminar): ${activas.length}\n` : '') +
+      '\nSi eliminas el slides ahora, se perderán de forma permanente las respuestas ' +
+      'de los alumnos de esas sesiones, porque todavía no fueron copiadas a Plickers.\n\n' +
+      'Recomendación: espera a que el archivado automático se ejecute (corre en las '
+      'noches de días de semana) y vuelve a intentarlo. Para entonces estas sesiones ' +
+      'ya estarán guardadas y podrás borrar el slides sin perder nada.\n\n' +
+      '¿Eliminar de todas formas y perder estos datos?'
+  } else if (activas.length > 0) {
+    // Hay sesiones activas (colgadas): no se pueden archivar hasta terminarlas.
+    mensaje =
+      '⚠ Este slides tiene ' + activas.length + ' sesión(es) todavía activa(s) (sin terminar).\n\n' +
+      'Una sesión sin terminar no se archiva, así que sus datos se perderían al borrar.\n' +
+      'Si esa sesión quedó abierta por error, conviene finalizarla primero desde el ' +
+      'historial de sesiones, dejar que se archive, y luego borrar el slides.\n\n' +
+      '¿Eliminar de todas formas?'
+  } else {
+    // Todas las sesiones terminadas y ya archivadas: borrar es seguro.
+    mensaje =
+      '¿Eliminar este slides y todas sus diapositivas?\n\n' +
+      `Este slides tiene ${finished.length} sesión(es), todas ya archivadas en Historico Alturas. ` +
+      'Sus resultados están guardados en el histórico y no se perderán.'
+  }
+
+  // 3. Confirmar y, solo si el profesor acepta, borrar.
+  if (!confirm(mensaje)) return
+
+  // También limpiamos las imágenes del bucket de las slides de este test,
+  // para no dejar archivos huérfanos en Storage.
+  const { data: files } = await supabase.storage
+    .from('slide-images').list(`slides/${id}`)
+  if (files?.length) {
+    await supabase.storage.from('slide-images')
+      .remove(files.map(f => `slides/${id}/${f.name}`))
+  }
+
+  const { error: delErr } = await supabase.from('presentations').delete().eq('id', id)
+  if (delErr) {
+    alert('No se pudo eliminar el slides. Intenta de nuevo.')
+    return
+  }
+  load()
+}
 
   return (
     <>
@@ -257,20 +316,20 @@ export default function PresentationsPage() {
         <div>
           <h1>
             <FileSliders size={20} style={{ verticalAlign:'middle', marginRight:'.4rem' }}/>
-            Tests
+            Slides
           </h1>
-          <p>Crea tests basados en diapositivas y lanza sesiones de escaneo en vivo.</p>
+          <p>Crea slides basados en diapositivas y lanza sesiones de escaneo en vivo.</p>
         </div>
         <button className="btn btn-primary" onClick={() => setModal('new')}>
-          <Plus size={14}/> New Test
+          <Plus size={14}/> Crear Slides
         </button>
       </div>
 
       {presentations.length === 0 ? (
         <div className="empty">
           <div className="empty-icon">📋</div>
-          <h3>No hay Tests creados</h3>
-          <p>Crea tu primer test para construir diapositivas y preguntas.</p>
+          <h3>No hay Slides creados</h3>
+          <p>Crea tu primer slide para construir diapositivas y preguntas.</p>
         </div>
       ) : (
         <div className="card-grid">
