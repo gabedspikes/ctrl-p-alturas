@@ -28,7 +28,7 @@ export default function AuthPage() {
         {/* Logo */}
         <div style={{ textAlign: 'center', marginBottom: '2.5rem' }}>
           <div style={{ fontSize: '2rem', fontWeight: 800, color: 'var(--accent)', letterSpacing: '.1em' }}>
-            ◈ CTRL-P-ALT
+            ◈ CTRL-ALT
           </div>
           <p style={{ color: 'var(--muted)', fontSize: '.85rem', marginTop: '.4rem' }}>
             Sistema de respuestas interactivas para clases

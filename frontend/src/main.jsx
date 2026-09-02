@@ -44,10 +44,10 @@ function Layout({ children }) {
   return (
     <div className="app">
       <nav className="nav">
-        <span className="nav-logo">◈ CTRL-P-ALT</span>
+        <span className="nav-logo">◈ CTRL-ALT</span>
         <div className="nav-links">
           <NavLink to="/" end className={({isActive}) => isActive ? 'active' : ''}>Cursos</NavLink>
-          <NavLink to="/presentations" className={({isActive}) => isActive ? 'active' : ''}>Tests</NavLink>
+          <NavLink to="/presentations" className={({isActive}) => isActive ? 'active' : ''}>Slides</NavLink>
           <NavLink to="/cards" className={({isActive}) => isActive ? 'active' : ''}>Tarjetas</NavLink>
           <NavLink to="/scan" className={({isActive}) => isActive ? 'active' : ''}>Escanear</NavLink>
         </div>
