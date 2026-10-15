@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useEffect, useState } from 'react'
 import { supabase } from './supabase'
+import { setErrorUser, logError } from './errorLog'
 
 const AuthContext = createContext(null)
 
@@ -8,13 +9,22 @@ export function AuthProvider({ children }) {
 
   useEffect(() => {
     // Get initial session
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    supabase.auth.getSession().then(({ data: { session }, error }) => {
+      if (error) logError('auth.getSession', error)
       setUser(session?.user ?? null)
+      setErrorUser(session?.user?.email)
+    }).catch(err => {
+      // Sin red al abrir la app: no dejar al usuario pegado en "Loading…"
+      logError('auth.getSession', err)
+      setUser(null)
     })
 
     // Listen for auth changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      (_event, session) => setUser(session?.user ?? null)
+      (_event, session) => {
+        setUser(session?.user ?? null)
+        setErrorUser(session?.user?.email)
+      }
     )
     return () => subscription.unsubscribe()
   }, [])

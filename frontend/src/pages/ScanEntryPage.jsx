@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
+import { logError, friendlyError } from '../lib/errorLog'
 
 // Pantalla del teléfono: el profe teclea el código de 6 dígitos que muestra
 // el computador y entra directo al escáner de esa sesión. Reemplaza al QR.
@@ -24,7 +25,7 @@ export default function ScanEntryPage() {
       .maybeSingle()
 
     setLoad(false)
-    if (qErr) { setError('Error de conexión. Intenta de nuevo.'); return }
+    if (qErr) { logError('scanEntry', qErr); setError(friendlyError(qErr, 'Error de conexión. Intenta de nuevo.')); return }
     if (!data?.id) { setError('Código no válido o sesión finalizada.'); return }
     navigate(`/scan/${data.id}`)
   }

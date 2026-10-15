@@ -2,7 +2,7 @@
  * Service Worker — CTRL-P-ALT PWA
  * Network-first: online siempre sirve lo último; la caché es solo respaldo offline.
  */
-const CACHE_NAME = 'ctrl-p-alt-v2'   // súbelo en cada cambio grande para bustear caché
+const CACHE_NAME = 'ctrl-p-alt-v3'   // súbelo en cada cambio grande para bustear caché
 
 self.addEventListener('install', event => {
   self.skipWaiting()

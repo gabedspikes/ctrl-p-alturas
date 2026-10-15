@@ -3,6 +3,8 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 import { ArrowLeft, Printer } from 'lucide-react'
 import { MARKERS } from '../lib/markers.js'
 import { supabase } from '../lib/supabase'
+import { logError, friendlyError } from '../lib/errorLog'
+import { useSchoolYear } from '../lib/schoolYear'
 
 // ── Single card SVG ───────────────────────────────────────
 // El nombre del alumno YA NO se dibuja dentro del SVG: se imprime grande
@@ -132,6 +134,8 @@ export default function CardGeneratorPage() {
   const [selectedCourse, setSelectedCourse] = useState(courseId || '')
   const [students, setStudents] = useState([])
   const [loading, setLoading] = useState(false)
+  const [loadErr, setLoadErr] = useState('')
+  const year = useSchoolYear()
   const printRef = useRef()
 
   const availableIds = Object.keys(MARKERS).map(Number)  // 1–50
@@ -147,30 +151,37 @@ export default function CardGeneratorPage() {
 
   // Load students from current year generation when course selected
   useEffect(() => {
-    if (!selectedCourse) { setStudents([]); return }
-    setLoading(true)
-    const year = new Date().getFullYear()
-    supabase.from('generations').select('id')
-      .eq('course_id', selectedCourse).eq('year', year).single()
-      .then(({ data: gen }) => {
-        if (!gen) { setStudents([]); setLoading(false); return }
-        supabase.from('generation_students')
-          .select('card_id, students(id, name, rut)')
-          .eq('generation_id', gen.id)
-          .eq('active', true)
-          .order('card_id')
-          .then(({ data }) => {
-            const flat = (data || []).map(gs => ({
-              id: gs.students.id,
-              name: gs.students.name,
-              rut: gs.students.rut,
-              card_id: gs.card_id,
-            }))
-            setStudents(flat)
-            setLoading(false)
-          })
-      })
-  }, [selectedCourse])
+    if (!selectedCourse || !year) { setStudents([]); return }
+    let cancelled = false
+    async function load() {
+      setLoading(true); setLoadErr('')
+      try {
+        const { data: gen, error: e1 } = await supabase.from('generations').select('id')
+          .eq('course_id', selectedCourse).eq('year', year).maybeSingle()
+        if (e1) throw e1
+        let flat = []
+        if (gen) {
+          const { data, error: e2 } = await supabase.from('generation_students')
+            .select('card_id, students(id, name, rut)')
+            .eq('generation_id', gen.id)
+            .eq('active', true)
+            .order('card_id')
+          if (e2) throw e2
+          flat = (data || []).map(gs => ({
+            id: gs.students.id, name: gs.students.name, rut: gs.students.rut, card_id: gs.card_id,
+          }))
+        }
+        if (!cancelled) setStudents(flat)
+      } catch (err) {
+        logError('cards.load', err)
+        if (!cancelled) setLoadErr(friendlyError(err, 'No se pudo cargar la lista del curso.'))
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    }
+    load()
+    return () => { cancelled = true }   // al cambiar rápido de curso no se mezclan listas
+  }, [selectedCourse, year])
 
   // Which card IDs to show: if class selected, show only assigned cards;
   // otherwise show all 50
@@ -179,6 +190,7 @@ export default function CardGeneratorPage() {
     : availableIds.map(id => ({ id, name: null, rut: null }))
 
   function printCards() {
+    if (!printRef.current) return
     const svgs = Array.from(printRef.current.querySelectorAll('svg')).map(s => s.outerHTML)
     const title = selectedCourse
       ? `Tarjetas — ${courses.find(c => c.id === selectedCourse)?.name || 'Cursos'}`
@@ -231,7 +243,8 @@ export default function CardGeneratorPage() {
               <option key={c.id} value={c.id}>{c.name}</option>
             ))}
           </select>
-          {selectedCourse && students.length === 0 && !loading && (
+          {loadErr && <span style={{ color:'var(--danger)', fontSize:'.8rem' }}>{loadErr}</span>}
+          {selectedCourse && students.length === 0 && !loading && !loadErr && (
             <span style={{ color:'var(--danger)', fontSize:'.8rem' }}>
               No hay alumnos en esta clase para el año actual. Selecciona otra clase o muestra todas las tarjetas.
             </span>

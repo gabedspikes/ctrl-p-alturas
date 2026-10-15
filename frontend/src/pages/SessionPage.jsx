@@ -1,6 +1,8 @@
 import React, { useEffect, useState, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
+import { logError, friendlyError } from '../lib/errorLog'
+import { useOnline } from '../lib/useOnline'
 import { ChevronLeft, ChevronRight, Smartphone } from 'lucide-react'
 import SlideRenderer from '../components/SlideRenderer'
 
@@ -61,6 +63,10 @@ export default function SessionPage() {
   const [showResults, setShowResults] = useState(false)  // final results reveal, hidden by default
   const [scannerConnected, setScannerConnected] = useState(false)
   const autoOpenedRef = useRef(false)
+  const slidesRef = useRef([])
+  const [loadErr, setLoadErr] = useState('')
+  const [rtDown, setRtDown] = useState(false)
+  const online = useOnline()
 
   // Measure the slide stage to keep the slide big but proportional (16:9)
   const stageRef = useRef(null)
@@ -84,7 +90,13 @@ export default function SessionPage() {
         .from('sessions')
         .select('*, presentations(title, subject_id), courses(id,name), generations(id, year)')
         .eq('id', sessionId).single()
-      if (sessErr || !sess) { console.error('Session load failed:', sessErr); return }
+      if (sessErr || !sess) {
+        logError('session.load', sessErr || new Error('Sesión no encontrada'), { sessionId })
+        setLoadErr(sessErr && sessErr.code !== 'PGRST116'
+          ? friendlyError(sessErr, 'No se pudo cargar la sesión.')
+          : 'Sesión no encontrada.')
+        return
+      }
       setSession(sess)
 
       // Traer el nombre del subject por separado (evita join anidado frágil)
@@ -99,6 +111,7 @@ export default function SessionPage() {
       const { data: sl } = await supabase
         .from('slides').select('*')
         .eq('presentation_id', sess.presentation_id).order('slide_order')
+      slidesRef.current = sl || []
       setSlides(sl || [])
 
       // Students always come from the generation (course fallback removed)
@@ -119,9 +132,7 @@ export default function SessionPage() {
       }
       setStudents(studs)
 
-      const { data: resp } = await supabase
-        .from('responses').select('*').eq('session_id', sessionId)
-      setResponses(resp || [])
+      await refetchResponses()
 
       if (sess.current_slide_id && sl) {
         const idx = sl.findIndex(s => s.id === sess.current_slide_id)
@@ -130,6 +141,16 @@ export default function SessionPage() {
     }
     load()
   }, [sessionId])
+
+  // Trae TODAS las respuestas de la sesión desde la base. Se usa al cargar y
+  // cada vez que el canal realtime se reconecta: los eventos que llegan
+  // mientras el WiFi está caído se pierden y sin esto los % quedan cortos.
+  async function refetchResponses() {
+    const { data, error } = await supabase
+      .from('responses').select('*').eq('session_id', sessionId)
+    if (error) { logError('session.responses', error); return }
+    setResponses(data || [])
+  }
   // Al comenzar la sesión, abre el código automáticamente (una sola vez).
 useEffect(() => {
   if (session?.status === 'active' && !autoOpenedRef.current) {
@@ -161,15 +182,27 @@ useEffect(() => {
 
   // Realtime: keeps in sync with the phone scanner in both directions —
   // new responses (INSERT) coming from a scan, and slide changes (UPDATE)
-  // made from the phone's own Prev/Next controls. One channel, two listeners,
-  // instead of two separate websocket subscriptions.
+  // made from the phone's own Prev/Next controls. One channel, two listeners.
+  // Se suscribe una sola vez por sesión (lee las slides desde un ref) y al
+  // reconectar re-sincroniza respuestas y slide actual.
   useEffect(() => {
+    async function resyncSession() {
+      await refetchResponses()
+      const { data, error } = await supabase.from('sessions')
+        .select('status, finished_at, current_slide_id').eq('id', sessionId).single()
+      if (error) { logError('session.resync', error); return }
+      setSession(prev => prev ? { ...prev, status: data.status, finished_at: data.finished_at } : prev)
+      const idx = slidesRef.current.findIndex(s => s.id === data.current_slide_id)
+      if (idx >= 0) setCurrentIdx(idx)
+    }
+
+    let subscribedOnce = false
     const channel = supabase.channel(`session-${sessionId}`)
       .on('postgres_changes', {
         event: 'INSERT', schema: 'public', table: 'responses',
         filter: `session_id=eq.${sessionId}`
       }, payload => {
-        setResponses(prev => prev.find(r => r.id === payload.new.id) ? prev : [...prev, payload.new])
+        setResponses(prev => prev.some(r => r.id === payload.new.id) ? prev : [...prev, payload.new])
       })
       .on('postgres_changes', {
         event: 'UPDATE', schema: 'public', table: 'sessions',
@@ -181,31 +214,62 @@ useEffect(() => {
         }
         const newSlideId = payload.new.current_slide_id
         if (newSlideId) {
-          const idx = slides.findIndex(s => s.id === newSlideId)
+          const idx = slidesRef.current.findIndex(s => s.id === newSlideId)
           if (idx >= 0) setCurrentIdx(idx)
         }
       })
-      .subscribe()
-    return () => supabase.removeChannel(channel)
-  }, [sessionId, slides])
+      .subscribe(st => {
+        if (st === 'SUBSCRIBED') {
+          setRtDown(false)
+          if (subscribedOnce) resyncSession()
+          subscribedOnce = true
+        } else if (st === 'CHANNEL_ERROR' || st === 'TIMED_OUT' || st === 'CLOSED') {
+          setRtDown(true)
+        }
+      })
+    const onVisible = () => { if (document.visibilityState === 'visible') resyncSession() }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => {
+      document.removeEventListener('visibilitychange', onVisible)
+      supabase.removeChannel(channel)
+    }
+  }, [sessionId])
 
   async function goTo(idx) {
     if (idx < 0 || idx >= slides.length) return
+    const prevIdx = currentIdx
     setCurrentIdx(idx)
-    await supabase.from('sessions')
+    const { error } = await supabase.from('sessions')
       .update({ current_slide_id: slides[idx].id })
       .eq('id', sessionId)
+    if (error) {
+      // Si no se guardó, el teléfono seguiría registrando en la slide
+      // anterior: se vuelve atrás y se avisa.
+      setCurrentIdx(prevIdx)
+      logError('session.goTo', error)
+      alert(friendlyError(error, 'No se pudo cambiar de slide. Revisa la conexión e intenta de nuevo.'))
+    }
   }
 
   async function finishSession() {
     if (!confirm('¿Finalizar la sesión? Podrás revelar los resultados después.')) return
-    await supabase.from('sessions')
+    const { error } = await supabase.from('sessions')
       .update({ status: 'finished', finished_at: new Date().toISOString() })
       .eq('id', sessionId)
+    if (error) {
+      logError('session.finish', error)
+      alert(friendlyError(error, 'No se pudo finalizar la sesión. Intenta de nuevo.'))
+      return
+    }
     setSession(prev => ({ ...prev, status: 'finished' }))
   }
 
-  if (!session) return <div style={{ padding:'2rem', color:'var(--muted)' }}>Loading session…</div>
+  if (!session) return (
+    <div style={{ padding:'2rem', color: loadErr ? 'var(--danger)' : 'var(--muted)' }}>
+      {loadErr || 'Cargando sesión…'}
+      {loadErr && <button className="btn btn-ghost btn-sm" style={{ marginLeft:'.75rem' }} onClick={() => location.reload()}>Reintentar</button>}
+    </div>
+  )
 
   const currentSlide  = slides[currentIdx]
   const totalStudents = students.length
@@ -254,6 +318,22 @@ useEffect(() => {
           )}
         </div>
       </div>
+
+      {(!online || rtDown) && !isFinished && (
+        <div style={{ background:'rgba(255,165,0,.12)', color:'#ffa500', fontSize:'.82rem',
+          padding:'.5rem 1.25rem', borderBottom:'1px solid rgba(255,165,0,.3)' }}>
+          {!online
+            ? '⚠ Sin conexión a internet. Los resultados en pantalla pueden estar incompletos.'
+            : '⚠ Reconectando… los porcentajes se actualizarán al volver la conexión.'}
+        </div>
+      )}
+      {totalStudents === 0 && !isFinished && (
+        <div style={{ background:'rgba(255,71,87,.1)', color:'var(--danger)', fontSize:'.82rem',
+          padding:'.5rem 1.25rem', borderBottom:'1px solid rgba(255,71,87,.3)' }}>
+          ⚠ Este curso no tiene alumnos activos para este año: el teléfono no registrará ninguna tarjeta.
+          Agrega o copia los alumnos en Cursos y vuelve a iniciar la sesión.
+        </div>
+      )}
 
       <div className="session-layout">
         {/* Left: slide + controls + optional results */}

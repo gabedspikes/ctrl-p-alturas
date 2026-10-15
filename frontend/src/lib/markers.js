@@ -56,3 +56,5 @@ export const MARKERS = {
   39: [0,1,0,1,1, 1,1,0,0,1, 1,0,0,0,0, 0,0,0,0,0, 1,1,1,0,0],
   40: [1,1,1,1,0, 1,1,0,0,1, 0,1,1,0,0, 1,1,0,0,1, 1,1,0,1,0],
 }
+// Cantidad de tarjetas escaneables. La app NO debe asignar números mayores.
+export const MAX_CARD = Object.keys(MARKERS).length

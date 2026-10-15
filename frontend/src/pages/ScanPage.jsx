@@ -2,6 +2,8 @@ import { ArucoDetector } from '../lib/aruco-detector.js'
 import React, { useEffect, useRef, useState, useCallback } from 'react'
 import { useParams, useSearchParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
+import { logError, friendlyError } from '../lib/errorLog'
+import { useOnline } from '../lib/useOnline'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
 import SlideRenderer from '../components/SlideRenderer'
 
@@ -44,6 +46,20 @@ export default function ScanPage() {
   const [slides, setSlides] = useState([])   // ordered list, for Prev/Next controls
   const [showList, setShowList] = useState(false)   // lista de alumnos oculta por defecto
   const [videoAspect, setVideoAspect] = useState(4/3)
+  const [errorKind, setErrorKind] = useState('session')   // session | camera
+  const [saveFailing, setSaveFailing] = useState(false)   // último guardado falló
+  const [rtDown, setRtDown] = useState(false)             // canal realtime caído
+  const online = useOnline()
+
+  // Refs que leen los callbacks del bucle de cámara (que se crean una sola
+  // vez). Antes el bucle usaba el submitAnswer del PRIMER render, con el
+  // currentSlideId de ese momento.
+  const currentSlideIdRef = useRef(null)
+  const slideReadyRef = useRef(false)   // false mientras se carga la slide nueva
+  const slideReqRef = useRef(0)         // descarta respuestas de cargas viejas
+  const submitRef = useRef(null)
+  const studentsRef   = useRef({})
+  const slideInfoRef  = useRef(null)
 
   const COOLDOWN_MS = 2000
   const CONFIRM_FRAMES = 3   // frames coincidentes antes de registrar
@@ -69,9 +85,16 @@ useEffect(() => {
         .select('*, courses(id, name), presentations(title), generations(id, year)')
         .eq('id', sessionId).single()
 
-      if (sessErr || !sess) { setError('Session not found.'); setStatus('error'); return }
+      if (sessErr || !sess) {
+        if (sessErr) logError('scan.loadSession', sessErr, { sessionId })
+        setErrorKind('session')
+        setError(sessErr && sessErr.code !== 'PGRST116'
+          ? friendlyError(sessErr, 'No se pudo cargar la sesión.')
+          : 'Sesión no encontrada. Revisa el código en el computador.')
+        setStatus('error'); return
+      }
       setSessionInfo(sess)
-      setCurrentSlideId(sess.current_slide_id)
+      if (sess.status !== 'active') { setSessionEnded(true); setStatus('ready'); return }
 
       // Ordered slide list so Prev/Next can be controlled from the phone too
       const { data: slideList } = await supabase
@@ -83,11 +106,12 @@ useEffect(() => {
       // Students always come from the generation (course fallback removed)
       let studs = []
       if (sess.generation_id) {
-        const { data: genStu } = await supabase
+        const { data: genStu, error: gsErr } = await supabase
           .from('generation_students')
           .select('card_id, students(id, name, rut)')
           .eq('generation_id', sess.generation_id)
           .eq('active', true)
+        if (gsErr) logError('scan.loadStudents', gsErr)
         studs = (genStu || []).map(gs => ({
           id: gs.students.id,
           name: gs.students.name,
@@ -97,15 +121,15 @@ useEffect(() => {
       }
       const map = {}
       studs.forEach(s => { map[s.card_id] = s })
+      studentsRef.current = map
       setStudents(map)
-
-      // load slide info for correct answer
-      if (sess.current_slide_id) {
-        const { data: sl } = await supabase
-          .from('slides').select('id, question_text, correct_answer')
-          .eq('id', sess.current_slide_id).single()
-        setSlideInfo(sl)
+      if (studs.length === 0) {
+        setErrorKind('session')
+        setError('Este curso no tiene alumnos activos para este año. Revisa la lista del curso en el computador (Cursos) antes de escanear.')
+        setStatus('error'); return
       }
+
+      if (sess.current_slide_id) await applySlideChange(sess.current_slide_id)
 
       setStatus('ready')
     }
@@ -115,17 +139,39 @@ useEffect(() => {
   // Applies a slide change locally: resets per-slide scan state and reloads
   // the slide's question/correct answer. Used both by the realtime listener
   // (when the computer changes slide) and by the Prev/Next buttons below.
+  // Mientras carga, el escaneo queda en pausa (slideReadyRef = false) para
+  // que ninguna lectura se registre en la slide equivocada. Además trae las
+  // respuestas ya guardadas de esa slide: si el teléfono se recarga, no se
+  // vuelve a pedir a los alumnos que levanten la tarjeta.
   async function applySlideChange(newSlideId) {
+    const req = ++slideReqRef.current
+    slideReadyRef.current = false
+    currentSlideIdRef.current = newSlideId
     setCurrentSlideId(newSlideId)
     scannedRef.current = {}
     cooldownRef.current = {}
-    confirmRef.current  = {} 
+    confirmRef.current  = {}
     setScanned({})
-    
-    const { data: sl } = await supabase
-      .from('slides').select('id, question_text, correct_answer')
-      .eq('id', newSlideId).single()
+
+    const [{ data: sl, error: slErr }, { data: prev, error: rErr }] = await Promise.all([
+      supabase.from('slides').select('id, question_text, correct_answer').eq('id', newSlideId).single(),
+      supabase.from('responses').select('student_id, answer').eq('session_id', sessionId).eq('slide_id', newSlideId),
+    ])
+    if (req !== slideReqRef.current) return       // llegó otro cambio mientras tanto
+    if (slErr) { logError('scan.loadSlide', slErr); setSaveFailing(true); return }
+    if (rErr) logError('scan.loadPrevResponses', rErr)
+
+    const byStudent = {}
+    for (const r of prev || []) byStudent[r.student_id] = r.answer
+    const already = {}
+    for (const st of Object.values(studentsRef.current)) {
+      if (byStudent[st.id]) already[st.card_id] = byStudent[st.id]
+    }
+    scannedRef.current = already
+    setScanned(already)
+    slideInfoRef.current = sl
     setSlideInfo(sl)
+    slideReadyRef.current = true
   }
 
   // Prev/Next from the phone — writes to the shared session row, same as
@@ -142,45 +188,73 @@ useEffect(() => {
     .eq('id', sessionId)
 
   if (error) {
-    console.error('No se pudo cambiar la slide:', error)
+    logError('scan.goToSlide', error)
+    alert(friendlyError(error, 'No se pudo cambiar la slide. Intenta de nuevo.'))
     return
   }
   applySlideChange(newSlideId)
 }
 async function finishSession() {
   if (!confirm('¿Finalizar la sesión para todos? Esto cierra la presentación.')) return
-  await supabase.from('sessions')
+  const { error } = await supabase.from('sessions')
     .update({ status: 'finished', finished_at: new Date().toISOString() })
     .eq('id', sessionId)
+  if (error) {
+    logError('scan.finishSession', error)
+    alert(friendlyError(error, 'No se pudo finalizar la sesión. Intenta de nuevo.'))
+  }
 }
   // ── Realtime: follow slide changes from laptop (or from this phone) ──
+  // Una sola suscripción por sesión (antes se recreaba en cada cambio de
+  // slide). Si el canal se cae y vuelve, se re-sincroniza desde la base
+  // porque los eventos perdidos durante el corte no se reenvían.
   useEffect(() => {
+    function stopCamera() {
+      if (videoRef.current?.srcObject) {
+        videoRef.current.srcObject.getTracks().forEach(t => t.stop())
+      }
+      if (rafRef.current) cancelAnimationFrame(rafRef.current)
+    }
+    function applyRow(row) {
+      if (row.status === 'finished') { stopCamera(); setSessionEnded(true); return }
+      if (row.current_slide_id && row.current_slide_id !== currentSlideIdRef.current) {
+        applySlideChange(row.current_slide_id)
+      }
+    }
+    async function resync() {
+      const { data, error } = await supabase.from('sessions')
+        .select('status, current_slide_id').eq('id', sessionId).single()
+      if (error) { logError('scan.resync', error); return }
+      applyRow(data)
+    }
+
+    let subscribedOnce = false
     const channel = supabase.channel(`scan-session-${sessionId}`)
       .on('postgres_changes', {
         event: 'UPDATE', schema: 'public', table: 'sessions',
         filter: `id=eq.${sessionId}`
-      }, payload => {
-        // If session finished, stop camera and show end screen
-        if (payload.new.status === 'finished') {
-          if (videoRef.current?.srcObject) {
-            videoRef.current.srcObject.getTracks().forEach(t => t.stop())
-          }
-          if (rafRef.current) cancelAnimationFrame(rafRef.current)
-          setSessionEnded(true)
-          return
-        }
-        const newSlideId = payload.new.current_slide_id
-        if (newSlideId && newSlideId !== currentSlideId) {
-          applySlideChange(newSlideId)
+      }, payload => applyRow(payload.new))
+      .subscribe(st => {
+        if (st === 'SUBSCRIBED') {
+          setRtDown(false)
+          if (subscribedOnce) resync()
+          subscribedOnce = true
+        } else if (st === 'CHANNEL_ERROR' || st === 'TIMED_OUT' || st === 'CLOSED') {
+          setRtDown(true)
         }
       })
-      .subscribe()
-    return () => supabase.removeChannel(channel)
-  }, [sessionId, currentSlideId])
+    // Al volver de segundo plano (pantalla bloqueada) también se re-sincroniza
+    const onVisible = () => { if (document.visibilityState === 'visible') resync() }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => {
+      document.removeEventListener('visibilitychange', onVisible)
+      supabase.removeChannel(channel)
+    }
+  }, [sessionId])
 
   // ── Start camera ─────────────────────────────────────────
   useEffect(() => {
-    if (status !== 'ready') return
+    if (status !== 'ready' || sessionEnded) return
     async function startCamera() {
       try {
         // prefer rear camera on phones
@@ -195,7 +269,13 @@ async function finishSession() {
         await videoRef.current.play()
         setCamReady(true)
       } catch (err) {
-        setError(`Camera error: ${err.message}. Make sure you allow camera access.`)
+        logError('scan.camera', err, { name: err?.name })
+        setErrorKind('camera')
+        setError(
+          err?.name === 'NotAllowedError'  ? 'Se negó el permiso de cámara. Actívalo en los ajustes del navegador para este sitio y recarga.' :
+          err?.name === 'NotFoundError'    ? 'Este dispositivo no tiene cámara disponible.' :
+          err?.name === 'NotReadableError' ? 'La cámara está siendo usada por otra app. Ciérrala y recarga.' :
+          `No se pudo iniciar la cámara (${err?.message || err}).`)
         setStatus('error')
       }
     }
@@ -214,7 +294,9 @@ async function finishSession() {
       detectorRef.current = new ArucoDetector()
       startDetectionLoop()
     } catch(e) {
-      setError(`ArUco init failed: ${e.message}`)
+      logError('scan.arucoInit', e)
+      setErrorKind('camera')
+      setError(`No se pudo iniciar el detector de tarjetas: ${e.message}`)
       setStatus('error')
     }
     return () => { if (rafRef.current) cancelAnimationFrame(rafRef.current) }
@@ -231,12 +313,14 @@ async function finishSession() {
       if (video.readyState === video.HAVE_ENOUGH_DATA) {
         const w = video.videoWidth
         const h = video.videoHeight
-        canvas.width  = w
-        canvas.height = h
-        overlay.width  = w
-        overlay.height = h
+        // Redimensionar un canvas lo reinicia y reasigna memoria: hacerlo
+        // solo cuando cambia el tamaño (antes era en cada frame).
+        if (canvas.width !== w || canvas.height !== h) {
+          canvas.width = w; canvas.height = h
+          overlay.width = w; overlay.height = h
+        }
 
-        const ctx = canvas.getContext('2d')
+        const ctx = canvas.getContext('2d', { willReadFrequently: true })
         ctx.drawImage(video, 0, 0, w, h)
         const imageData = ctx.getImageData(0, 0, w, h)
 
@@ -294,7 +378,7 @@ async function finishSession() {
             oct.stroke()
 
             // Submit only after N frames agree (filtra falsos positivos esporádicos)
-if (student && cooled && !alreadyScanned) {
+if (student && cooled && !alreadyScanned && slideReadyRef.current) {
   const prev = confirmRef.current[cardId]
   if (prev && prev.answer === answer) prev.count++
   else confirmRef.current[cardId] = { answer, count: 1 }
@@ -302,12 +386,14 @@ if (student && cooled && !alreadyScanned) {
   if (confirmRef.current[cardId].count >= CONFIRM_FRAMES) {
     cooldownRef.current[cardId] = now
     confirmRef.current[cardId] = null
-    submitAnswer(cardId, answer, student.id)
+    submitRef.current?.(cardId, answer, student.id)
   }
 }
           })
         } catch (e) {
-          // detection errors are non-fatal, just skip frame
+          // Un frame con error no es fatal: se salta. Se registra (con
+          // deduplicación) para enterarnos si pasa seguido en algún teléfono.
+          logError('scan.detectFrame', e)
         }
       }
       rafRef.current = requestAnimationFrame(tick)
@@ -316,33 +402,41 @@ if (student && cooled && !alreadyScanned) {
   }, [])
 
   // ── Keep refs in sync so callbacks see latest state ──────
-  const studentsRef   = useRef({})
-  const slideInfoRef  = useRef(null)
   useEffect(() => { studentsRef.current  = students  }, [students])
-  useEffect(() => { slideInfoRef.current = slideInfo }, [slideInfo])
 
   // ── Submit answer to Supabase ────────────────────────────
+  // upsert + ignoreDuplicates: si el teléfono se recargó o hay 2 teléfonos
+  // en la misma sesión, la base guarda UNA respuesta por alumno y slide.
+  // is_correct lo recalcula la base (trigger) con la respuesta correcta real.
   async function submitAnswer(cardId, answer, studentId) {
-    const sid = currentSlideId || slideInfoRef.current?.id
-    if (!sid) return
-
+    const sid = currentSlideIdRef.current
+    if (!sid || !slideReadyRef.current) return
     const correct = slideInfoRef.current?.correct_answer
     const is_correct = correct ? answer === correct : null
 
-    const { error } = await supabase.from('responses').insert({
+    const { error } = await supabase.from('responses').upsert({
       session_id:  sessionId,
       slide_id:    sid,
       student_id:  studentId,
       answer,
       is_correct,
       scanned_at:  new Date().toISOString()
-    })
+    }, { onConflict: 'session_id,slide_id,student_id', ignoreDuplicates: true })
 
+    if (sid !== currentSlideIdRef.current) return   // la slide cambió mientras se guardaba
     if (!error) {
+      setSaveFailing(false)
       scannedRef.current[cardId] = answer
       setScanned(prev => ({ ...prev, [cardId]: answer }))
+      return
     }
+    if (/finalizada/i.test(error.message)) { setSessionEnded(true); return }
+    // Otro error (red, etc.): no se marca como escaneado → se reintenta solo
+    // al volver a ver la tarjeta tras el cooldown. Se avisa al profesor.
+    setSaveFailing(true)
+    logError('scan.submitAnswer', error, { cardId, slide: sid })
   }
+  submitRef.current = submitAnswer
 
   // ── Count helpers ─────────────────────────────────────────
   const currentSlideIdx = slides.findIndex(s => s.id === currentSlideId)
@@ -353,12 +447,13 @@ if (student && cooled && !alreadyScanned) {
   if (status === 'error') return (
     <div style={styles.errorScreen}>
       <div style={styles.errorBox}>
-        <div style={{ fontSize: '2rem', marginBottom: '1rem' }}>📷</div>
-        <h2 style={{ color: '#ff4757', marginBottom: '.75rem' }}>Camera Error</h2>
+        <div style={{ fontSize: '2rem', marginBottom: '1rem' }}>{errorKind === 'camera' ? '📷' : '⚠'}</div>
+        <h2 style={{ color: '#ff4757', marginBottom: '.75rem' }}>
+          {errorKind === 'camera' ? 'Problema con la cámara' : 'No se puede escanear'}
+        </h2>
         <p style={{ color: '#888', fontSize: '.9rem', lineHeight: 1.6 }}>{error}</p>
-        <p style={{ color: '#555', fontSize: '.8rem', marginTop: '1rem' }}>
-          Make sure you opened this page over HTTP (not HTTPS) and allowed camera permissions.
-        </p>
+        <button style={{ ...styles.finishBtn, marginTop: '1.25rem', color: '#e8e8ec', borderColor: '#2a2a30', padding: '.5rem 1rem' }}
+          onClick={() => location.reload()}>Reintentar</button>
       </div>
     </div>
   )
@@ -376,7 +471,7 @@ if (student && cooled && !alreadyScanned) {
   if (status !== 'ready' && status !== 'init') return (
     <div style={styles.loadingScreen}>
       <div style={{ color: '#2E9DF2', fontSize: '1.5rem' }}>◈</div>
-      <p style={{ color: '#888', marginTop: '.5rem' }}>Loading session…</p>
+      <p style={{ color: '#888', marginTop: '.5rem' }}>Cargando sesión…</p>
     </div>
   )
 
@@ -395,6 +490,16 @@ if (student && cooled && !alreadyScanned) {
         </div>
         <button style={styles.finishBtn} onClick={finishSession}>Finalizar</button>
       </div>
+
+      {(!online || rtDown || saveFailing) && (
+        <div style={styles.warnBar}>
+          {!online
+            ? '⚠ Sin conexión. Las lecturas no se están guardando.'
+            : saveFailing
+              ? '⚠ No se pudo guardar la última lectura. Se reintenta al volver a ver la tarjeta.'
+              : '⚠ Reconectando con el computador…'}
+        </div>
+      )}
 
       {/* Slide navigation — lets the professor advance from the phone too */}
       {slides.length > 1 && (
@@ -577,6 +682,10 @@ const styles = {
   background: 'transparent', border: '1px solid #ff4757', color: '#ff4757',
   borderRadius: 6, padding: '.3rem .55rem', fontSize: '.7rem', fontWeight: 700,
   cursor: 'pointer', whiteSpace: 'nowrap',
+},
+warnBar: {
+  background: 'rgba(255,165,0,.15)', color: '#ffa500', fontSize: '.75rem',
+  padding: '.45rem 1rem', borderBottom: '1px solid rgba(255,165,0,.3)', textAlign: 'center',
 },
 listToggle: {
   width: '100%', background: '#141417', border: 'none',

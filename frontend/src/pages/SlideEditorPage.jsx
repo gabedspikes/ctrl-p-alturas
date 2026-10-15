@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabase'
 import SlideRenderer from '../components/SlideRenderer'
 import { ArrowLeft, Plus, Trash2, ImageIcon, Save, X } from 'lucide-react'
 import imageCompression from 'browser-image-compression'
+import { logError, friendlyError } from '../lib/errorLog'
 
 const ANS_COLORS = { A:'#22c55e', B:'#3b82f6', C:'#f97316', D:'#ef4444' }
 
@@ -50,6 +51,8 @@ export default function SlideEditorPage() {
   const [uploading, setUploading] = useState(false)
   const [dirty, setDirty] = useState(false) // unsaved changes flag
   const [ansUploading, setAnsUploading] = useState({})   // { A:true, ... }
+  const [saveErr, setSaveErr] = useState('')
+  const [loadErr, setLoadErr] = useState('')
 
   const draftRef  = useRef(draft)
   const activeIdxRef = useRef(0)
@@ -61,24 +64,37 @@ export default function SlideEditorPage() {
   // ── Load ─────────────────────────────────────────────────
   useEffect(() => {
     async function init() {
-     const { data: pres } = await supabase
+     const { data: pres, error: pErr } = await supabase
         .from('presentations').select('*, courses(name), subjects(name)').eq('id', presentationId).single()
+      if (pErr || !pres) {
+        logError('editor.loadPresentation', pErr || new Error('no encontrado'), { presentationId })
+        setLoadErr(friendlyError(pErr, 'No se encontró este test.'))
+        return
+      }
       setPresentation(pres)
 
-      const { data: sl } = await supabase
+      const { data: sl, error: sErr } = await supabase
         .from('slides').select('*')
         .eq('presentation_id', presentationId).order('slide_order')
+      if (sErr) {
+        // Sin esto, un error de red se confundía con "test vacío" y se
+        // creaba una slide nueva duplicada.
+        logError('editor.loadSlides', sErr)
+        setLoadErr(friendlyError(sErr, 'No se pudieron cargar las diapositivas.'))
+        return
+      }
 
       if (sl && sl.length > 0) {
         setSlides(sl)
         loadDraft(sl[0])
         setActiveIdx(0)
       } else {
-        const { data: newSlide } = await supabase.from('slides').insert({
+        const { data: newSlide, error: nErr } = await supabase.from('slides').insert({
           presentation_id: presentationId,
           slide_order: 0,
           ...EMPTY_SLIDE_FIELDS,
         }).select().single()
+        if (nErr) { logError('editor.firstSlide', nErr); setLoadErr(friendlyError(nErr)); return }
         setSlides([newSlide])
         loadDraft(newSlide)
         setActiveIdx(0)
@@ -115,10 +131,10 @@ export default function SlideEditorPage() {
   // ── Save ─────────────────────────────────────────────────
   const saveSlide = useCallback(async () => {
     const slide = slides[activeIdxRef.current]
-    if (!slide) return
-    setSaving(true)
+    if (!slide) return true
+    setSaving(true); setSaveErr('')
     const d = draftRef.current
-    await supabase.from('slides').update({
+    const { error } = await supabase.from('slides').update({
       question_text:  d.question_text  || null,
       answer_a:       d.answer_a       || null,
       answer_b:       d.answer_b       || null,
@@ -135,29 +151,47 @@ export default function SlideEditorPage() {
       answer_layout: d.answer_layout || 'list',
     }).eq('id', slide.id)
 
-    // refresh list
-    const { data } = await supabase.from('slides').select('*')
-      .eq('presentation_id', presentationId).order('slide_order')
-    setSlides(data || [])
+    if (error) {
+      // Se mantiene "Cambios no guardados" para que el profesor sepa que
+      // debe reintentar (antes la pantalla decía guardado y se perdía).
+      setSaving(false)
+      logError('editor.saveSlide', error, { slide: slide.id })
+      setSaveErr(friendlyError(error, 'No se pudo guardar. Revisa la conexión y vuelve a presionar Save.'))
+      return false
+    }
+
+    // Actualiza la slide en la lista local (sin volver a pedir todo)
+    setSlides(prev => prev.map(x => x.id === slide.id ? { ...x, ...d } : x))
     setSaving(false)
     setDirty(false)
+    return true
   }, [slides, presentationId])
+
+  // Aviso del navegador si se cierra o recarga con cambios sin guardar
+  useEffect(() => {
+    if (!dirty) return
+    const h = e => { e.preventDefault(); e.returnValue = '' }
+    window.addEventListener('beforeunload', h)
+    return () => window.removeEventListener('beforeunload', h)
+  }, [dirty])
 
   // ── Switch slide ─────────────────────────────────────────
   async function switchSlide(idx) {
-    if (dirty) await saveSlide()
+    if (dirty && !(await saveSlide())) return
     setActiveIdx(idx)
     loadDraft(slides[idx])
   }
 
   // ── Add / Delete slides ──────────────────────────────────
   async function addSlide() {
-    if (dirty) await saveSlide()
-    const { data: newSlide } = await supabase.from('slides').insert({
+    if (dirty && !(await saveSlide())) return
+    const maxOrder = slides.reduce((m, s) => Math.max(m, s.slide_order ?? 0), -1)
+    const { data: newSlide, error } = await supabase.from('slides').insert({
       presentation_id: presentationId,
-      slide_order: slides.length,
+      slide_order: maxOrder + 1,   // antes slides.length: tras borrar una, repetía órdenes
       ...EMPTY_SLIDE_FIELDS,
     }).select().single()
+    if (error) { logError('editor.addSlide', error); setSaveErr(friendlyError(error, 'No se pudo agregar la diapositiva.')); return }
     const newSlides = [...slides, newSlide]
     setSlides(newSlides)
     setActiveIdx(newSlides.length - 1)
@@ -171,8 +205,14 @@ export default function SlideEditorPage() {
     // Recoge todas las imágenes de la slide y bórralas del bucket
     const urls = [s.image_url, s.answer_a_image, s.answer_b_image,
                   s.answer_c_image, s.answer_d_image].filter(Boolean)
-    await Promise.all(urls.map(deleteFromBucket))
-    await supabase.from('slides').delete().eq('id', s.id)
+    const { error } = await supabase.from('slides').delete().eq('id', s.id)
+    if (error) {
+      logError('editor.deleteSlide', error)
+      // Si ya tiene respuestas de alumnos, la base puede impedir el borrado
+      alert(friendlyError(error, 'No se pudo borrar la diapositiva (puede tener respuestas de una sesión).'))
+      return
+    }
+    await Promise.all(urls.map(deleteFromBucket))   // imágenes solo si la slide se borró
     const remaining = slides.filter((_, i) => i !== idx)
     setSlides(remaining)
     const newIdx = Math.min(idx, remaining.length - 1)
@@ -213,7 +253,8 @@ export default function SlideEditorPage() {
       .from('slide-images')
       .upload(path, toUpload, { contentType: toUpload.type })
     if (error) {
-      alert('No se pudo subir la imagen. Revisa tu conexión e intenta de nuevo.')
+      logError('editor.upload', error, { size: toUpload.size, type: toUpload.type })
+      alert(friendlyError(error, 'No se pudo subir la imagen. Revisa tu conexión e intenta de nuevo.'))
       return null
     }
     const { data } = supabase.storage.from('slide-images').getPublicUrl(path)
@@ -239,7 +280,9 @@ export default function SlideEditorPage() {
     setUploading(true)
     const old = draftRef.current.image_url
     const url = await uploadToBucket(file)
-    if (url && old) await deleteFromBucket(old)   // limpia la anterior solo si la nueva subió
+    e.target.value = ''                            // permite volver a elegir el mismo archivo
+    if (!url) { setUploading(false); return }      // antes un fallo borraba la imagen anterior del borrador
+    if (old) await deleteFromBucket(old)
     updateDraft('image_url', url)
     setUploading(false)
   }
@@ -255,7 +298,8 @@ async function removeImage() {
     setAnsUploading(u => ({ ...u, [letter]: true }))
     const old = draftRef.current[`answer_${l}_image`]
     const url = await uploadToBucket(file)
-    if (url && old) await deleteFromBucket(old)
+    if (!url) { setAnsUploading(u => ({ ...u, [letter]: false })); return }
+    if (old) await deleteFromBucket(old)
     updateDraft(`answer_${l}_image`, url)
     if (!draftRef.current[`answer_${l}`]) {
       updateDraft(`answer_${l}`, 'Porfavor agregar un texto descriptivo de la imagen')
@@ -269,10 +313,11 @@ async function removeImage() {
     updateDraft(`answer_${l}_image`, null)
   }
 
-  if (!presentation) return (
-    <div style={{ minHeight:'100vh', background:'var(--bg)', display:'flex',
-      alignItems:'center', justifyContent:'center', color:'var(--muted)' }}>
-      Loading…
+  if (!presentation || loadErr) return (
+    <div style={{ minHeight:'100vh', background:'var(--bg)', display:'flex', flexDirection:'column', gap:'1rem',
+      alignItems:'center', justifyContent:'center', color: loadErr ? 'var(--danger)' : 'var(--muted)' }}>
+      {loadErr || 'Cargando…'}
+      {loadErr && <button className="btn btn-ghost btn-sm" onClick={() => navigate('/presentations')}>Volver</button>}
     </div>
   )
 
@@ -288,7 +333,10 @@ async function removeImage() {
         background:'var(--surface)', borderBottom:'1px solid var(--border)',
         position:'sticky', top:0, zIndex:50, flexShrink:0,
       }}>
-        <button className="btn btn-ghost btn-sm" onClick={() => navigate('/presentations')}>
+        <button className="btn btn-ghost btn-sm" onClick={async () => {
+          if (dirty && !(await saveSlide()) && !confirm('No se pudieron guardar los cambios. ¿Salir igual y perderlos?')) return
+          navigate('/presentations')
+        }}>
           <ArrowLeft size={14}/> Back
         </button>
         <div>
@@ -304,7 +352,10 @@ async function removeImage() {
         </div>
     
         <div style={{ marginLeft:'auto', display:'flex', gap:'.5rem', alignItems:'center' }}>
-          {dirty && (
+          {saveErr && (
+            <span style={{ fontSize:'.75rem', color:'var(--danger)' }}>{saveErr}</span>
+          )}
+          {dirty && !saveErr && (
             <span style={{ fontSize:'.75rem', color:'var(--muted)', fontStyle:'italic' }}>
               Cambios no guardados
             </span>

@@ -14,6 +14,10 @@ import CardGeneratorPage from './pages/CardGeneratorPage'
 import './styles.css'
 import InstallPrompt from './components/InstallPrompt'
 import ScanEntryPage from './pages/ScanEntryPage'
+import ErrorBoundary from './components/ErrorBoundary'
+import { installGlobalErrorHandlers } from './lib/errorLog'
+
+installGlobalErrorHandlers()
 
 // ── Protected route ───────────────────────────────────────
 function Protected({ children }) {
@@ -78,7 +82,13 @@ function AppRoutes() {
   // PWA instalada en un teléfono → "modo escáner": la app solo escanea y
   // controla las slides. El mismo teléfono en el navegador normal, o el
   // computador (aunque tenga la PWA), siguen viendo la app completa.
-  const scannerMode = useIsMobile() && useIsPWA()
+  // Los dos hooks se llaman SIEMPRE (antes `useIsMobile() && useIsPWA()`
+  // saltaba el segundo cuando el primero era false: al cruzar los 820px —
+  // redimensionar la ventana o girar el teléfono — React cambiaba la
+  // cantidad de hooks y la app se caía).
+  const isMobile = useIsMobile()
+  const isPWA = useIsPWA()
+  const scannerMode = isMobile && isPWA
 
   return (
     <AuthProvider>
@@ -114,7 +124,9 @@ function AuthGate() {
 }
 
 ReactDOM.createRoot(document.getElementById('root')).render(
-  <BrowserRouter>
-    <AppRoutes />
-  </BrowserRouter>
+  <ErrorBoundary>
+    <BrowserRouter>
+      <AppRoutes />
+    </BrowserRouter>
+  </ErrorBoundary>
 )
