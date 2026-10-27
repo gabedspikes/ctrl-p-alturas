@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState, useCallback } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import SlideRenderer from '../components/SlideRenderer'
@@ -18,6 +18,9 @@ const BG_PRESETS = [
   { color: '#450a0a', label: 'Dark red'    },
 ]
 
+// Tamaño máximo de la imagen original elegida (antes de comprimir).
+const MAX_IMAGE_MB = 10
+
 function isColorDark(hex = '#1a1a20') {
   try {
     const r = parseInt(hex.slice(1,3),16)
@@ -27,7 +30,7 @@ function isColorDark(hex = '#1a1a20') {
   } catch { return true }
 }
 
-// ── Empty slide template ──────────────────────────────────
+// ── Campos editables de una slide ─────────────────────────
 const EMPTY_SLIDE_FIELDS = {
   question_text: '',
   answer_a: '', answer_b: '', answer_c: '', answer_d: '',
@@ -38,136 +41,314 @@ const EMPTY_SLIDE_FIELDS = {
   text_scale: 1,
   answer_layout: 'list',
 }
+const FIELD_NAMES = Object.keys(EMPTY_SLIDE_FIELDS)
+const IMAGE_FIELDS = ['image_url', 'answer_a_image', 'answer_b_image', 'answer_c_image', 'answer_d_image']
+
+let tempCounter = 0
+const newKey = () => `new-${Date.now()}-${tempCounter++}`
+
+// Slide de la base → slide en memoria. `_key` identifica la slide en la lista
+// (las nuevas todavía no tienen id de la base).
+function fromDb(row) {
+  const s = { id: row.id, _key: row.id }
+  for (const f of FIELD_NAMES) s[f] = row[f] ?? EMPTY_SLIDE_FIELDS[f]
+  s.text_scale    = row.text_scale    || 1
+  s.answer_layout = row.answer_layout || 'list'
+  s.bg_color      = row.bg_color      || '#1a1a20'
+  return s
+}
+const newSlide = () => ({ id: null, _key: newKey(), ...EMPTY_SLIDE_FIELDS })
+
+const isBlob = url => typeof url === 'string' && url.startsWith('blob:')
+
+// URL pública del bucket → ruta interna que espera storage.remove()
+function bucketPath(publicUrl) {
+  const marker = '/slide-images/'
+  const i = publicUrl?.indexOf(marker) ?? -1
+  return i === -1 ? null : publicUrl.slice(i + marker.length)
+}
 
 export default function SlideEditorPage() {
   const { id: presentationId } = useParams()
   const navigate = useNavigate()
 
+  // Todo el test vive en memoria mientras se edita; Supabase recibe el estado
+  // final recién al presionar Guardar (o al confirmar la salida).
   const [presentation, setPresentation] = useState(null)
   const [slides, setSlides] = useState([])
   const [activeIdx, setActiveIdx] = useState(0)
-  const [draft, setDraft] = useState(EMPTY_SLIDE_FIELDS) // local editable copy
+  const [dirty, setDirty] = useState(false)
   const [saving, setSaving] = useState(false)
-  const [uploading, setUploading] = useState(false)
-  const [dirty, setDirty] = useState(false) // unsaved changes flag
-  const [ansUploading, setAnsUploading] = useState({})   // { A:true, ... }
+  const [ansUploading, setAnsUploading] = useState({})   // { A:true } mientras se comprime
   const [saveErr, setSaveErr] = useState('')
   const [loadErr, setLoadErr] = useState('')
+  const [leaveOpen, setLeaveOpen] = useState(false)       // diálogo de salida
 
-  const draftRef  = useRef(draft)
+  const slidesRef = useRef(slides)
   const activeIdxRef = useRef(0)
-  useEffect(() => { draftRef.current = draft }, [draft])
-  useEffect(() => { activeIdxRef.current = activeIdx }, [activeIdx])
+  const dirtyRef = useRef(false)
+  slidesRef.current = slides
+  activeIdxRef.current = activeIdx
+  dirtyRef.current = dirty
+
+  // Imágenes elegidas pero aún no subidas: URL blob: → File comprimido
+  const pendingFiles = useRef(new Map())
+  // Ya subidas en un intento de guardado que falló: URL blob: → URL pública
+  // (al reintentar no se vuelven a subir)
+  const uploadedCache = useRef(new Map())
+  // Imágenes del bucket que usa la versión guardada en la base
+  const savedImages = useRef(new Set())
 
   const activeSlide = slides[activeIdx]
+  const draft = activeSlide || EMPTY_SLIDE_FIELDS
 
   // ── Load ─────────────────────────────────────────────────
   useEffect(() => {
     async function init() {
-     const { data: pres, error: pErr } = await supabase
+      const { data: pres, error: pErr } = await supabase
         .from('presentations').select('*, courses(name), subjects(name)').eq('id', presentationId).single()
       if (pErr || !pres) {
         logError('editor.loadPresentation', pErr || new Error('no encontrado'), { presentationId })
         setLoadErr(friendlyError(pErr, 'No se encontró este test.'))
         return
       }
-      setPresentation(pres)
 
       const { data: sl, error: sErr } = await supabase
         .from('slides').select('*')
         .eq('presentation_id', presentationId).order('slide_order')
       if (sErr) {
-        // Sin esto, un error de red se confundía con "test vacío" y se
-        // creaba una slide nueva duplicada.
         logError('editor.loadSlides', sErr)
         setLoadErr(friendlyError(sErr, 'No se pudieron cargar las diapositivas.'))
         return
       }
 
-      if (sl && sl.length > 0) {
-        setSlides(sl)
-        loadDraft(sl[0])
-        setActiveIdx(0)
-      } else {
-        const { data: newSlide, error: nErr } = await supabase.from('slides').insert({
-          presentation_id: presentationId,
-          slide_order: 0,
-          ...EMPTY_SLIDE_FIELDS,
-        }).select().single()
-        if (nErr) { logError('editor.firstSlide', nErr); setLoadErr(friendlyError(nErr)); return }
-        setSlides([newSlide])
-        loadDraft(newSlide)
-        setActiveIdx(0)
-      }
+      const list = sl?.length ? sl.map(fromDb) : [newSlide()]   // test vacío: slide nueva solo en memoria
+      savedImages.current = collectImages(list)
+      setPresentation(pres)
+      setSlides(list)
+      setActiveIdx(0)
+      setDirty(false)
     }
     init()
   }, [presentationId])
 
-  function loadDraft(slide) {
-    setDraft({
-      question_text:  slide.question_text  || '',
-      answer_a:       slide.answer_a       || '',
-      answer_b:       slide.answer_b       || '',
-      answer_c:       slide.answer_c       || '',
-      answer_d:       slide.answer_d       || '',
-      correct_answer: slide.correct_answer || null,
-      bg_color:       slide.bg_color       || '#1a1a20',
-      image_url:      slide.image_url      || null,
-      answer_a_image: slide.answer_a_image || null,
-      answer_b_image: slide.answer_b_image || null,
-      answer_c_image: slide.answer_c_image || null,
-      answer_d_image: slide.answer_d_image || null,
-      text_scale:     slide.text_scale     || 1,
-      answer_layout: slide.answer_layout || 'list',
-    })
-    setDirty(false)
+  // Libera las URLs blob: al salir del editor
+  useEffect(() => () => {
+    for (const url of pendingFiles.current.keys()) URL.revokeObjectURL(url)
+  }, [])
+
+  function collectImages(list) {
+    const set = new Set()
+    for (const s of list) for (const f of IMAGE_FIELDS) if (s[f]) set.add(s[f])
+    return set
   }
 
+  // ── Editar ───────────────────────────────────────────────
+  // Siempre con actualización funcional sobre la slide activa: no hay una copia
+  // "borrador" aparte que se pueda desincronizar de la lista.
+  function updateSlide(key, field, value) {
+    setSlides(prev => prev.map(s => s._key === key ? { ...s, [field]: value } : s))
+    setDirty(true)
+  }
   function updateDraft(field, value) {
-    setDraft(d => ({ ...d, [field]: value }))
+    const s = slidesRef.current[activeIdxRef.current]
+    if (s) updateSlide(s._key, field, value)
+  }
+  const slideByKey = key => slidesRef.current.find(s => s._key === key)
+
+  // Si una URL blob: deja de usarse, se suelta el archivo de la memoria
+  function releaseIfBlob(url) {
+    if (!isBlob(url)) return
+    pendingFiles.current.delete(url)
+    uploadedCache.current.delete(url)
+    URL.revokeObjectURL(url)
+  }
+
+  // ── Slides ───────────────────────────────────────────────
+  function switchSlide(idx) {
+    setActiveIdx(idx)   // los cambios ya están en `slides`, no hay nada que guardar
+  }
+
+  function addSlide() {
+    const n = slidesRef.current.length
+    setSlides(prev => [...prev, newSlide()])
+    setActiveIdx(n)
     setDirty(true)
   }
 
-  // ── Save ─────────────────────────────────────────────────
-  const saveSlide = useCallback(async () => {
-    const slide = slides[activeIdxRef.current]
-    if (!slide) return true
-    setSaving(true); setSaveErr('')
-    const d = draftRef.current
-    const { error } = await supabase.from('slides').update({
-      question_text:  d.question_text  || null,
-      answer_a:       d.answer_a       || null,
-      answer_b:       d.answer_b       || null,
-      answer_c:       d.answer_c       || null,
-      answer_d:       d.answer_d       || null,
-      correct_answer: d.correct_answer || null,
-      bg_color:       d.bg_color       || '#1a1a20',
-      image_url:      d.image_url      || null,
-      answer_a_image: d.answer_a_image || null,
-      answer_b_image: d.answer_b_image || null,
-      answer_c_image: d.answer_c_image || null,
-      answer_d_image: d.answer_d_image || null,
-      text_scale:     d.text_scale     || 1,
-      answer_layout: d.answer_layout || 'list',
-    }).eq('id', slide.id)
+  async function deleteSlide(idx) {
+    const list = slidesRef.current
+    if (list.length === 1) return alert('No se puede borrar la única diapositiva.')
+    const removed = list[idx]
+    // Una slide con respuestas de alumnos no se puede borrar (la base lo
+    // impide). Se avisa ahora y no al guardar, cuando ya no hay cómo deshacer.
+    if (removed.id) {
+      const { count, error } = await supabase.from('responses')
+        .select('id', { count: 'exact', head: true }).eq('slide_id', removed.id)
+      if (error) { logError('editor.checkResponses', error); return alert(friendlyError(error, 'No se pudo verificar la diapositiva. Revisa la conexión.')) }
+      if (count > 0) return alert('Esta diapositiva ya tiene respuestas de alumnos en una sesión, así que no se puede borrar.')
+    }
+    if (!confirm('¿Borrar esta diapositiva?')) return
+    // Tras los await la lista pudo cambiar: se recalcula con la actual
+    const current = slidesRef.current
+    const pos = current.findIndex(s => s._key === removed._key)
+    if (pos === -1 || current.length === 1) return
+    for (const f of IMAGE_FIELDS) releaseIfBlob(current[pos][f])
+    setSlides(prev => prev.filter(s => s._key !== removed._key))
+    const active = activeIdxRef.current
+    if (pos < active || (pos === active && active === current.length - 1)) setActiveIdx(active - 1)
+    setDirty(true)
+  }
 
-    if (error) {
-      // Se mantiene "Cambios no guardados" para que el profesor sepa que
-      // debe reintentar (antes la pantalla decía guardado y se perdía).
+  // ── Imágenes (en memoria hasta guardar) ──────────────────
+  async function compressImage(file) {
+    // Reduce el peso 5–15× sin pérdida visible: máx 1600px, calidad ~0.8.
+    // Los SVG y GIF se dejan tal cual (comprimirlos los rompe/anima mal).
+    if (/svg|gif/i.test(file.type)) return file
+    try {
+      const out = await imageCompression(file, {
+        maxSizeMB: 0.5,
+        maxWidthOrHeight: 1600,
+        useWebWorker: true,
+        initialQuality: 0.8,
+        fileType: 'image/webp',
+      })
+      // Conserva el nombre original para armar la ruta al subir
+      return new File([out], file.name.replace(/\.[^.]+$/, '') + '.webp', { type: out.type })
+    } catch (err) {
+      console.warn('Compresión falló, se usa el original:', err)
+      return file
+    }
+  }
+
+  // Devuelve una URL blob: para la vista previa, o null si se rechaza
+  async function pickImage(file) {
+    if (!file) return null
+    if (!file.type.startsWith('image/')) { alert('El archivo debe ser una imagen.'); return null }
+    if (file.size > MAX_IMAGE_MB * 1024 * 1024) {
+      alert(`La imagen pesa ${(file.size / 1024 / 1024).toFixed(1)} MB. El máximo es ${MAX_IMAGE_MB} MB.`)
+      return null
+    }
+    const compressed = await compressImage(file)
+    const url = URL.createObjectURL(compressed)
+    pendingFiles.current.set(url, compressed)
+    return url
+  }
+
+  // Se identifica la slide por `_key` antes de comprimir: si el profesor cambia
+  // de slide mientras tanto, la imagen igual queda en la slide correcta.
+  async function setImage(key, field, file) {
+    const url = await pickImage(file)
+    if (!url) return false
+    const s = slideByKey(key)
+    if (!s) { releaseIfBlob(url); return false }   // la slide se borró entretanto
+    releaseIfBlob(s[field])   // la anterior, si nunca se subió
+    updateSlide(key, field, url)
+    return true
+  }
+
+  function removeImage(field) {
+    releaseIfBlob(draft[field])
+    updateDraft(field, null)
+  }
+
+  async function handleAnswerImageUpload(letter, file) {
+    if (!file || !activeSlide) return
+    const l = letter.toLowerCase()
+    const key = activeSlide._key
+    setAnsUploading(u => ({ ...u, [letter]: true }))
+    const ok = await setImage(key, `answer_${l}_image`, file)
+    if (ok && !slideByKey(key)?.[`answer_${l}`]) {
+      updateSlide(key, `answer_${l}`, 'Porfavor agregar un texto descriptivo de la imagen')
+    }
+    setAnsUploading(u => ({ ...u, [letter]: false }))
+  }
+
+  function removeAnswerImage(letter) {
+    removeImage(`answer_${letter.toLowerCase()}_image`)
+  }
+
+  async function uploadFile(file) {
+    const ext  = file.name.split('.').pop() || 'webp'
+    const base = file.name.replace(/\.[^.]+$/, '').replace(/[^\w-]/g, '_')
+    const path = `slides/${presentationId}/${Date.now()}_${Math.random().toString(36).slice(2, 7)}_${base}.${ext}`
+    const { error } = await supabase.storage.from('slide-images').upload(path, file, { contentType: file.type })
+    if (error) throw error
+    return supabase.storage.from('slide-images').getPublicUrl(path).data.publicUrl
+  }
+
+  // ── Guardar ──────────────────────────────────────────────
+  // 1) sube solo las imágenes que siguen en uso, 2) envía todas las slides en
+  // una transacción (RPC save_slides), 3) recién ahí borra del bucket las
+  // imágenes que ya no se usan. Si algo falla, nada se pierde de la memoria.
+  async function saveAll() {
+    if (saving) return false
+    setSaving(true); setSaveErr('')
+    const snapshot = slidesRef.current
+    try {
+      // 1. Subir imágenes nuevas
+      const urlMap = new Map()
+      for (const s of snapshot) for (const f of IMAGE_FIELDS) {
+        const url = s[f]
+        if (!isBlob(url) || urlMap.has(url)) continue
+        let pub = uploadedCache.current.get(url)
+        if (!pub) {
+          const file = pendingFiles.current.get(url)
+          if (!file) throw new Error('Falta una imagen en memoria; vuelve a elegirla.')
+          pub = await uploadFile(file)
+          uploadedCache.current.set(url, pub)
+        }
+        urlMap.set(url, pub)
+      }
+
+      // 2. Enviar el estado final
+      const payload = snapshot.map(s => {
+        const row = { id: s.id }
+        for (const f of FIELD_NAMES) {
+          const v = s[f]
+          row[f] = urlMap.get(v) ?? (v === '' ? null : v)
+        }
+        row.bg_color      = row.bg_color      || '#1a1a20'
+        row.text_scale    = row.text_scale    || 1
+        row.answer_layout = row.answer_layout || 'list'
+        return row
+      })
+      const { data: rows, error } = await supabase.rpc('save_slides', {
+        p_presentation_id: presentationId,
+        p_slides: payload,
+      })
+      if (error) throw error
+
+      // 3. Limpiar el bucket: imágenes guardadas antes que ya no se usan
+      const saved = rows.map(fromDb)
+      const nowUsed = collectImages(saved)
+      const orphans = [...savedImages.current].filter(u => !nowUsed.has(u)).map(bucketPath).filter(Boolean)
+      if (orphans.length) {
+        const { error: rmErr } = await supabase.storage.from('slide-images').remove(orphans)
+        if (rmErr) console.warn('No se pudieron borrar imágenes huérfanas:', orphans, rmErr)
+      }
+      savedImages.current = nowUsed
+
+      for (const url of urlMap.keys()) releaseIfBlob(url)
+      setSlides(saved)
+      setActiveIdx(i => Math.min(i, saved.length - 1))
+      setDirty(false)
       setSaving(false)
-      logError('editor.saveSlide', error, { slide: slide.id })
-      setSaveErr(friendlyError(error, 'No se pudo guardar. Revisa la conexión y vuelve a presionar Save.'))
+      return true
+    } catch (error) {
+      logError('editor.saveAll', error, { presentationId })
+      const msg = error?.code === '23503'
+        ? 'No se pudo guardar: una diapositiva borrada tiene respuestas de alumnos registradas mientras editabas.'
+        : friendlyError(error, 'No se pudo guardar. Revisa la conexión y vuelve a presionar Guardar.')
+      setSaveErr(msg)
+      setSaving(false)
       return false
     }
+  }
 
-    // Actualiza la slide en la lista local (sin volver a pedir todo)
-    setSlides(prev => prev.map(x => x.id === slide.id ? { ...x, ...d } : x))
-    setSaving(false)
-    setDirty(false)
-    return true
-  }, [slides, presentationId])
-
+  // ── Salir ────────────────────────────────────────────────
   // Aviso del navegador si se cierra o recarga con cambios sin guardar
+  // (el navegador muestra su propio mensaje; el texto no se puede cambiar).
   useEffect(() => {
     if (!dirty) return
     const h = e => { e.preventDefault(); e.returnValue = '' }
@@ -175,142 +356,45 @@ export default function SlideEditorPage() {
     return () => window.removeEventListener('beforeunload', h)
   }, [dirty])
 
-  // ── Switch slide ─────────────────────────────────────────
-  async function switchSlide(idx) {
-    if (dirty && !(await saveSlide())) return
-    setActiveIdx(idx)
-    loadDraft(slides[idx])
-  }
-
-  // ── Add / Delete slides ──────────────────────────────────
-  async function addSlide() {
-    if (dirty && !(await saveSlide())) return
-    const maxOrder = slides.reduce((m, s) => Math.max(m, s.slide_order ?? 0), -1)
-    const { data: newSlide, error } = await supabase.from('slides').insert({
-      presentation_id: presentationId,
-      slide_order: maxOrder + 1,   // antes slides.length: tras borrar una, repetía órdenes
-      ...EMPTY_SLIDE_FIELDS,
-    }).select().single()
-    if (error) { logError('editor.addSlide', error); setSaveErr(friendlyError(error, 'No se pudo agregar la diapositiva.')); return }
-    const newSlides = [...slides, newSlide]
-    setSlides(newSlides)
-    setActiveIdx(newSlides.length - 1)
-    loadDraft(newSlide)
-  }
-
- async function deleteSlide(idx) {
-    if (slides.length === 1) return alert("Can't delete the last slide.")
-    if (!confirm('Delete this slide?')) return
-    const s = slides[idx]
-    // Recoge todas las imágenes de la slide y bórralas del bucket
-    const urls = [s.image_url, s.answer_a_image, s.answer_b_image,
-                  s.answer_c_image, s.answer_d_image].filter(Boolean)
-    const { error } = await supabase.from('slides').delete().eq('id', s.id)
-    if (error) {
-      logError('editor.deleteSlide', error)
-      // Si ya tiene respuestas de alumnos, la base puede impedir el borrado
-      alert(friendlyError(error, 'No se pudo borrar la diapositiva (puede tener respuestas de una sesión).'))
-      return
+  // Botón "atrás" del navegador: con cambios sin guardar se agrega una entrada
+  // extra al historial (misma URL); al volver atrás se repone y se abre el
+  // diálogo de salida en vez de perder el trabajo.
+  const guardRef = useRef(false)
+  useEffect(() => {
+    if (dirty && !guardRef.current) {
+      window.history.pushState(window.history.state, '', window.location.href)
+      guardRef.current = true
     }
-    await Promise.all(urls.map(deleteFromBucket))   // imágenes solo si la slide se borró
-    const remaining = slides.filter((_, i) => i !== idx)
-    setSlides(remaining)
-    const newIdx = Math.min(idx, remaining.length - 1)
-    setActiveIdx(newIdx)
-    loadDraft(remaining[newIdx])
-  }
-
-  // ── Image upload (shared) ────────────────────────────────
-  async function uploadToBucket(file) {
-    // Comprimir en el navegador antes de subir. Reduce el peso 5–15× sin
-    // pérdida visible: redimensiona a máx 1600px y re-encoda con calidad ~0.8.
-    // Los SVG y GIF se dejan pasar tal cual (comprimirlos los rompe/anima mal).
-    let toUpload = file
-    const skip = /svg|gif/i.test(file.type)
-    if (!skip) {
-      try {
-        toUpload = await imageCompression(file, {
-          maxSizeMB: 0.5,
-          maxWidthOrHeight: 1600,
-          useWebWorker: true,
-          initialQuality: 0.8,
-          fileType: 'image/webp',
-        })
-      } catch (err) {
-        console.warn('Compresión falló, se sube el original:', err)
-        toUpload = file
+  }, [dirty])
+  useEffect(() => {
+    function onPop() {
+      if (!guardRef.current) return
+      guardRef.current = false
+      if (dirtyRef.current) {
+        window.history.pushState(window.history.state, '', window.location.href)
+        guardRef.current = true
+        setLeaveOpen(true)
+      } else {
+        window.history.back()   // ya se guardó: seguir hacia atrás de verdad
       }
     }
+    window.addEventListener('popstate', onPop)
+    return () => window.removeEventListener('popstate', onPop)
+  }, [])
 
-    // La extensión debe reflejar el tipo final (webp tras comprimir).
-    const ext = skip
-      ? file.name.split('.').pop()
-      : (toUpload.type.split('/')[1] || 'webp')
-    const base = file.name.replace(/\.[^.]+$/, '').replace(/\s/g, '_')
-    const path = `slides/${presentationId}/${Date.now()}_${base}.${ext}`
-
-    const { error } = await supabase.storage
-      .from('slide-images')
-      .upload(path, toUpload, { contentType: toUpload.type })
-    if (error) {
-      logError('editor.upload', error, { size: toUpload.size, type: toUpload.type })
-      alert(friendlyError(error, 'No se pudo subir la imagen. Revisa tu conexión e intenta de nuevo.'))
-      return null
-    }
-    const { data } = supabase.storage.from('slide-images').getPublicUrl(path)
-    return data.publicUrl
-  }
-// ── Borrar imagen del bucket a partir de su URL pública ──
-  // Convierte la URL pública en la ruta interna que espera storage.remove().
-  // Silenciosa a propósito: si falla el borrado del archivo, no queremos
-  // bloquear la edición de la slide — a lo sumo queda un huérfano.
-  async function deleteFromBucket(publicUrl) {
-    if (!publicUrl) return
-    const marker = '/slide-images/'
-    const idx = publicUrl.indexOf(marker)
-    if (idx === -1) return
-    const path = publicUrl.slice(idx + marker.length)
-    const { error } = await supabase.storage.from('slide-images').remove([path])
-    if (error) console.warn('No se pudo borrar la imagen huérfana:', path, error)
+  function leave() {
+    setLeaveOpen(false)
+    setDirty(false)
+    navigate('/presentations', { replace: guardRef.current })
   }
 
- async function handleImageUpload(e) {
-    const file = e.target.files?.[0]
-    if (!file) return
-    setUploading(true)
-    const old = draftRef.current.image_url
-    const url = await uploadToBucket(file)
-    e.target.value = ''                            // permite volver a elegir el mismo archivo
-    if (!url) { setUploading(false); return }      // antes un fallo borraba la imagen anterior del borrador
-    if (old) await deleteFromBucket(old)
-    updateDraft('image_url', url)
-    setUploading(false)
+  function onBack() {
+    if (dirty) setLeaveOpen(true)
+    else leave()
   }
 
-async function removeImage() {
-    await deleteFromBucket(draftRef.current.image_url)
-    updateDraft('image_url', null)
-  }
-
-  async function handleAnswerImageUpload(letter, file) {
-    if (!file) return
-    const l = letter.toLowerCase()
-    setAnsUploading(u => ({ ...u, [letter]: true }))
-    const old = draftRef.current[`answer_${l}_image`]
-    const url = await uploadToBucket(file)
-    if (!url) { setAnsUploading(u => ({ ...u, [letter]: false })); return }
-    if (old) await deleteFromBucket(old)
-    updateDraft(`answer_${l}_image`, url)
-    if (!draftRef.current[`answer_${l}`]) {
-      updateDraft(`answer_${l}`, 'Porfavor agregar un texto descriptivo de la imagen')
-    }
-    setAnsUploading(u => ({ ...u, [letter]: false }))
-  }
-
- async function removeAnswerImage(letter) {
-    const l = letter.toLowerCase()
-    await deleteFromBucket(draftRef.current[`answer_${l}_image`])
-    updateDraft(`answer_${l}_image`, null)
+  async function saveAndLeave() {
+    if (await saveAll()) leave()
   }
 
   if (!presentation || loadErr) return (
@@ -321,8 +405,7 @@ async function removeImage() {
     </div>
   )
 
-  // Build a merged slide for the live preview
-  const previewSlide = activeSlide ? { ...activeSlide, ...draft } : null
+  const previewSlide = activeSlide || null
 
   return (
     <div style={{ background:'var(--bg)', minHeight:'100vh', display:'flex', flexDirection:'column' }}>
@@ -333,10 +416,7 @@ async function removeImage() {
         background:'var(--surface)', borderBottom:'1px solid var(--border)',
         position:'sticky', top:0, zIndex:50, flexShrink:0,
       }}>
-        <button className="btn btn-ghost btn-sm" onClick={async () => {
-          if (dirty && !(await saveSlide()) && !confirm('No se pudieron guardar los cambios. ¿Salir igual y perderlos?')) return
-          navigate('/presentations')
-        }}>
+        <button className="btn btn-ghost btn-sm" onClick={onBack} disabled={saving}>
           <ArrowLeft size={14}/> Back
         </button>
         <div>
@@ -360,8 +440,8 @@ async function removeImage() {
               Cambios no guardados
             </span>
           )}
-          <button className="btn btn-primary btn-sm" onClick={saveSlide} disabled={saving}>
-            <Save size={13}/> {saving ? 'Saving…' : 'Save'}
+          <button className="btn btn-primary btn-sm" onClick={saveAll} disabled={saving || !dirty}>
+            <Save size={13}/> {saving ? 'Guardando…' : 'Guardar'}
           </button>
         </div>
       </div>
@@ -372,6 +452,9 @@ async function removeImage() {
         gridTemplateColumns: '200px 1fr 300px',
         gap: 0, overflow:'hidden',
         height: 'calc(100vh - 57px)',
+        // Mientras se guarda no se puede editar: lo que llega de la base
+        // reemplaza la lista en memoria.
+        pointerEvents: saving ? 'none' : undefined, opacity: saving ? .6 : 1,
       }}>
 
         {/* ── Left: slide list ─────────────────────────── */}
@@ -393,7 +476,7 @@ async function removeImage() {
 
           <div style={{ flex:1, overflowY:'auto', padding:'.5rem', display:'flex', flexDirection:'column', gap:'.4rem' }}>
             {slides.map((s, i) => (
-              <div key={s.id}
+              <div key={s._key}
                 onClick={() => switchSlide(i)}
                 style={{
                   cursor:'pointer', borderRadius:6, overflow:'hidden',
@@ -628,6 +711,29 @@ async function removeImage() {
           </div>
         </div>
       </div>
+
+      {/* ── Diálogo de salida con cambios sin guardar ───── */}
+      {leaveOpen && (
+        <div className="modal-backdrop" onClick={() => !saving && setLeaveOpen(false)}>
+          <div className="modal" onClick={e => e.stopPropagation()}>
+            <h2>Cambios sin guardar</h2>
+            <p style={{ color:'var(--muted)', fontSize:'.875rem', marginBottom:'1rem' }}>
+              Tienes cambios en este test que todavía no se han guardado. ¿Qué quieres hacer?
+            </p>
+            {saveErr && <p style={{ color:'var(--danger)', fontSize:'.82rem', marginBottom:'.5rem' }}>{saveErr}</p>}
+            <div className="modal-footer">
+              <button className="btn btn-ghost" onClick={() => setLeaveOpen(false)} disabled={saving}>Cancelar</button>
+              <button className="btn btn-ghost" style={{ color:'var(--danger)' }} disabled={saving}
+                onClick={() => confirm('Se perderán todos los cambios sin guardar. ¿Salir igual?') && leave()}>
+                Salir sin guardar
+              </button>
+              <button className="btn btn-primary" onClick={saveAndLeave} disabled={saving}>
+                {saving ? 'Guardando…' : 'Guardar y salir'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Hover show delete on slide thumbs */}
       <style>{`
