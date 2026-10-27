@@ -6,6 +6,7 @@ import { logError, friendlyError } from '../lib/errorLog'
 import { useOnline } from '../lib/useOnline'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
 import SlideRenderer from '../components/SlideRenderer'
+import { shortName } from '../lib/names'
 import {
   loadCalibration, saveCalibration, frameTransform, drawFrame, videoCss,
   newCalibrationRun, addCalibrationFrame, DEFAULT_CALIBRATION,
@@ -737,7 +738,9 @@ if (student && cooled && !alreadyScanned && slideReadyRef.current) {
                 : '#222'
             }}>
               <span style={styles.cardBadge}>#{st.card_id}</span>
-              <span style={styles.studentName}>{st.name}</span>
+              <span style={styles.studentName} title={st.name}>
+                {shortName(st.name)}
+              </span>
               {ans
                 ? <span style={{ color: ANS_COLORS[ans], fontWeight: 800, fontSize: '.9rem' }}>{ans}</span>
                 : <span style={{ color: '#333', fontSize: '.75rem' }}>—</span>

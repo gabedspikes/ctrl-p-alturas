@@ -55,8 +55,11 @@ export default function SlideRenderer({
   const hasQuestion = !!slide.question_text
   const gridLayout = hasAnswers && slide.answer_layout === 'grid'
 
-  const qFontSize = (compact ? 11 : Math.max(14, Math.min(28, 28 - (slide.question_text?.length || 0) * 0.15))) * textScale
-  const aFontSize = (compact ? 9 : 13) * textScale
+  
+  const qFontSize = compact
+    ? 11 * textScale
+    : Math.max(14, Math.min(28, 28 - (slide.question_text?.length || 0) * 0.15)) * textScale * scale
+  const aFontSize = (compact ? 9 : 13 * scale) * textScale
 
   return (
     <div style={{

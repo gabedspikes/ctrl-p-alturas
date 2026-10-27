@@ -5,6 +5,7 @@ import { logError, friendlyError } from '../lib/errorLog'
 import { useOnline } from '../lib/useOnline'
 import { ChevronLeft, ChevronRight, Smartphone } from 'lucide-react'
 import SlideRenderer from '../components/SlideRenderer'
+import { shortName } from '../lib/names'
 
 import QRCode from 'qrcode'
 
@@ -397,7 +398,7 @@ useEffect(() => {
                     return (
                       <div key={st.id} className="student-cell">
                         <span className="card-no">#{st.card_id}</span>
-                        <span className="student-name">{st.name}</span>
+                        <span className="student-name" title={st.name}>{shortName(st.name)}</span>
                         <span className="score">{correct}/{answered}</span>
                       </div>
                     )
@@ -421,7 +422,7 @@ useEffect(() => {
                 return (
                   <div key={st.id} className={`student-cell compact${answered ? ' answered' : ''}`}>
                     <span className="card-no">#{st.card_id}</span>
-                    <span className="student-name">{st.name}</span>
+                    <span className="student-name" title={st.name}>{shortName(st.name)}</span>
                   </div>
                 )
               })}

@@ -18,6 +18,13 @@ const BG_PRESETS = [
   { color: '#450a0a', label: 'Dark red'    },
 ]
 
+// Tamaños de texto. Los pasos crecen hacia arriba (L y XL) para que en un
+// televisor la diferencia se note. Antes: S 0.85, M 1, L 1.2, XL 1.4.
+const TEXT_SIZES = [['S', 0.85], ['M', 1], ['L', 1.4], ['XL', 1.8]]
+// Slides guardadas con valores antiguos (1.2) marcan el botón más cercano
+function nearestTextSize(v = 1) {
+  return TEXT_SIZES.reduce((best, [, val]) => Math.abs(val - v) < Math.abs(best - v) ? val : best, 1)
+}
 // Tamaño máximo de la imagen original elegida (antes de comprimir).
 const MAX_IMAGE_MB = 10
 
@@ -656,8 +663,8 @@ export default function SlideEditorPage() {
               TAMAÑO DE TEXTO
             </label>
             <div style={{ display:'flex', gap:'.4rem' }}>
-              {[['S',0.85],['M',1],['L',1.2],['XL',1.4]].map(([label, val]) => {
-                const active = (draft.text_scale || 1) === val
+                            {TEXT_SIZES.map(([label, val]) => {
+                const active = nearestTextSize(draft.text_scale) === val
                 return (
                   <button key={label} onClick={() => updateDraft('text_scale', val)}
                     style={{
