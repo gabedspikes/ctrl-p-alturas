@@ -6,15 +6,21 @@ import { logError, friendlyError } from '../lib/errorLog'
 import { useOnline } from '../lib/useOnline'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
 import SlideRenderer from '../components/SlideRenderer'
+import {
+  loadCalibration, saveCalibration, frameTransform, drawFrame, videoCss,
+  newCalibrationRun, addCalibrationFrame, DEFAULT_CALIBRATION,
+} from '../lib/cameraCalibration'
 
 // ── Answer from ArUco rotation ───────────────────────────
-// The detector always returns a rotation index (0-3): how many 90° CW
-// rotations were needed to match the canonical marker pattern in the
-// dictionary. Mapping is A,D,C,B (not A,B,C,D) — the camera image rotates
-// opposite to the dictionary's un-rotation, which swaps B and D. Verified
-// across all 40 cards × 4 orientations (160/160 correct).
-function cornersToAnswer(rotation) {
-  return ['A', 'D', 'C', 'B'][(rotation ?? 0) % 4]
+// El detector devuelve cuántos giros de 90° HORARIOS necesita la grilla leída
+// para coincidir con el patrón del diccionario. Si hay que girarla 1 vez en
+// sentido horario, la tarjeta está girada 90° ANTIHORARIO: la B (lado derecho
+// impreso) queda arriba. Por eso el orden es A,B,C,D.
+// (Entre el 06-08-2026 y esta corrección era A,D,C,B, lo que invertía B y D
+// en cámaras normales: tarjeta con B arriba se registraba como D y viceversa.)
+// `offset` viene de la calibración de la cámara (0 en una cámara normal).
+function cornersToAnswer(rotation, offset = 0) {
+  return ['A', 'B', 'C', 'D'][(((rotation ?? 0) - offset) % 4 + 4) % 4]
 }
 
 // ── Answer colors ────────────────────────────────────────
@@ -50,6 +56,14 @@ export default function ScanPage() {
   const [saveFailing, setSaveFailing] = useState(false)   // último guardado falló
   const [rtDown, setRtDown] = useState(false)             // canal realtime caído
   const online = useOnline()
+
+  // Calibración de cámara (por teléfono, en localStorage)
+  const calibRef     = useRef(loadCalibration())   // la que usa el escaneo
+  const calibRunRef  = useRef(null)                // acumulador mientras se calibra
+  const calibOpenRef = useRef(false)               // con el popup abierto no se registran respuestas
+  const [calib, setCalib]         = useState(calibRef.current)
+  const [calibOpen, setCalibOpen] = useState(false)
+  const [calibUi, setCalibUi]     = useState({ phase: 'intro' })   // intro|running|done
 
   // Refs que leen los callbacks del bucle de cámara (que se crean una sola
   // vez). Antes el bucle usaba el submitAnswer del PRIMER render, con el
@@ -321,18 +335,31 @@ async function finishSession() {
         }
 
         const ctx = canvas.getContext('2d', { willReadFrequently: true })
-        ctx.drawImage(video, 0, 0, w, h)
-        const imageData = ctx.getImageData(0, 0, w, h)
-
         const oct = overlay.getContext('2d')
         oct.clearRect(0, 0, w, h)
+
+        // Calibrando: se analiza el cuadro normal y espejado, sin registrar nada
+        if (calibRunRef.current) {
+          try { calibrationTick(ctx, video, w, h) } catch (e) { logError('scan.calibrate', e) }
+          rafRef.current = requestAnimationFrame(tick)
+          return
+        }
+        // Popup de calibración abierto (intro/resultado): escaneo en pausa
+        if (calibOpenRef.current) {
+          rafRef.current = requestAnimationFrame(tick)
+          return
+        }
+
+        const t = frameTransform(calibRef.current)
+        drawFrame(ctx, video, w, h, t)
+        const imageData = ctx.getImageData(0, 0, w, h)
 
         try {
           const markers = detectorRef.current?.detect(imageData) || []
           markers.forEach(marker => {
             const cardId = marker.id
             const corners = marker.corners
-            const answer  = cornersToAnswer(marker.rotation)
+            const answer  = cornersToAnswer(marker.rotation, t.offset)
             const student = studentsRef.current[cardId]
             const alreadyScanned = scannedRef.current[cardId]
             const now = Date.now()
@@ -398,8 +425,74 @@ if (student && cooled && !alreadyScanned && slideReadyRef.current) {
       }
       rafRef.current = requestAnimationFrame(tick)
     }
+
+    let lastShown = null
+    function calibrationTick(ctx, video, w, h) {
+      const det = detectorRef.current
+      if (!det) return
+      drawFrame(ctx, video, w, h, { mirror: false })
+      const normal = det.detect(ctx.getImageData(0, 0, w, h)) || []
+      drawFrame(ctx, video, w, h, { mirror: true })
+      const mirrored = det.detect(ctx.getImageData(0, 0, w, h)) || []
+      if (!normal.length && !mirrored.length) return
+
+      const res = addCalibrationFrame(calibRunRef.current, normal, mirrored)
+      if (res.state === 'done') {
+        calibRunRef.current = null
+        lastShown = null
+        setCalibUi({ phase: 'done', result: res })
+      } else if (res.state === 'ambiguous') {
+        calibRunRef.current = newCalibrationRun()
+        setCalibUi({ phase: 'running', progress: 0,
+          msg: 'Esta tarjeta no sirve para calibrar. Prueba con una tarjeta de otro número.' })
+      } else if (res.state === 'multi') {
+        setCalibUi(u => ({ ...u, msg: 'Se ven varias tarjetas. Deja solo una frente a la cámara.' }))
+      } else {
+        const p = Math.round(res.progress * 10) / 10
+        if (p !== lastShown) { lastShown = p; setCalibUi(u => ({ ...u, progress: p })) }
+      }
+    }
+
     rafRef.current = requestAnimationFrame(tick)
   }, [])
+
+  // ── Calibración de cámara ────────────────────────────────
+  function cameraLabel() {
+    return videoRef.current?.srcObject?.getVideoTracks?.()[0]?.label || ''
+  }
+  function openCalibration() {
+    calibRunRef.current = null
+    calibOpenRef.current = true
+    setCalibUi({ phase: 'intro' })
+    setCalibOpen(true)
+  }
+  function closeCalibration() {
+    calibRunRef.current = null
+    calibOpenRef.current = false
+    setCalibOpen(false)
+  }
+  function startCalibration() {
+    calibRunRef.current = newCalibrationRun()
+    setCalibUi({ phase: 'running', progress: 0 })
+  }
+  function applyCalibration(c) {
+    calibRef.current = saveCalibration({ ...c, camera: cameraLabel() })
+    setCalib(calibRef.current)
+    confirmRef.current = {}   // descartar lecturas a medio confirmar con la configuración anterior
+    closeCalibration()
+  }
+  function skipCalibration() {
+    // Sin calibración guardada, "Omitir" deja la cámara como normal y no vuelve a preguntar
+    if (!calibRef.current) applyCalibration({ ...DEFAULT_CALIBRATION, skipped: true })
+    else closeCalibration()
+  }
+
+  // Primera vez en este teléfono, o la cámara cambió: abrir la calibración
+  useEffect(() => {
+    if (!camReady) return
+    const c = calibRef.current
+    if (!c || (c.camera && cameraLabel() && c.camera !== cameraLabel())) openCalibration()
+  }, [camReady])
 
   // ── Keep refs in sync so callbacks see latest state ──────
   useEffect(() => { studentsRef.current  = students  }, [students])
@@ -488,6 +581,7 @@ if (student && cooled && !alreadyScanned && slideReadyRef.current) {
           <span style={{ color: '#2E9DF2', fontWeight: 800, fontSize: '1.2rem' }}>{scannedCount}</span>
           <span style={{ color: '#555', fontSize: '.75rem' }}>/ {totalStudents}</span>
         </div>
+        <button style={styles.calibBtn} onClick={openCalibration} title="Calibrar cámara">📷</button>
         <button style={styles.finishBtn} onClick={finishSession}>Finalizar</button>
       </div>
 
@@ -539,7 +633,7 @@ if (student && cooled && !alreadyScanned && slideReadyRef.current) {
 
       {/* Camera viewfinder */}
       <div style={{ ...styles.viewfinder, aspectRatio: String(videoAspect) }}>
-        <video ref={videoRef} style={styles.video} playsInline muted autoPlay
+        <video ref={videoRef} style={{ ...styles.video, transform: calibOpen ? undefined : videoCss(calib) }} playsInline muted autoPlay
         onLoadedMetadata={e => {
         const v = e.currentTarget
        if (v.videoWidth && v.videoHeight) setVideoAspect(v.videoWidth / v.videoHeight) }}/>
@@ -558,6 +652,61 @@ if (student && cooled && !alreadyScanned && slideReadyRef.current) {
           </div>
         )}
       </div>
+
+      {/* ── Calibración de cámara ─────────────────────── */}
+      {calibOpen && (
+        <div style={styles.calibSheet}>
+          <div style={{ fontWeight: 800, marginBottom: '.4rem' }}>Calibrar cámara</div>
+
+          {calibUi.phase === 'intro' && (<>
+            <p style={styles.calibText}>
+              Algunos teléfonos entregan la imagen espejada o girada, y el escáner lee mal las
+              respuestas. Sostén <b>una</b> tarjeta frente a la cámara con la letra <b>A arriba</b>,
+              como la mostraría un alumno, y el teléfono en la posición en que vas a escanear.
+            </p>
+            <div style={styles.calibBtns}>
+              <button style={styles.calibGhost} onClick={skipCalibration}>
+                {calibRef.current ? 'Cancelar' : 'Omitir'}
+              </button>
+              <button style={styles.calibPrimary} onClick={startCalibration}>Comenzar</button>
+            </div>
+          </>)}
+
+          {calibUi.phase === 'running' && (<>
+            <p style={styles.calibText}>
+              {calibUi.msg || 'Buscando la tarjeta… mantenla quieta con la A arriba.'}
+            </p>
+            <div style={styles.calibBar}>
+              <div style={{ ...styles.calibFill, width: `${(calibUi.progress || 0) * 100}%` }}/>
+            </div>
+            <div style={styles.calibBtns}>
+              <button style={styles.calibGhost} onClick={closeCalibration}>Cancelar</button>
+            </div>
+          </>)}
+
+          {calibUi.phase === 'done' && (() => {
+            const r = calibUi.result
+            const normal = !r.mirror && r.rot === 0
+            return (<>
+              <p style={styles.calibText}>
+                {normal
+                  ? <>✓ Tu cámara funciona normal (tarjeta #{r.card} leída).</>
+                  : <>Se detectó que la imagen de tu cámara está
+                      {r.mirror ? <b> espejada</b> : null}
+                      {r.mirror && r.rot ? ' y' : null}
+                      {r.rot ? <b> girada {r.rot * 90}°</b> : null}
+                      {' '}(tarjeta #{r.card}). Se corregirá en el escaneo.</>}
+              </p>
+              <div style={styles.calibBtns}>
+                <button style={styles.calibGhost} onClick={startCalibration}>Repetir</button>
+                <button style={styles.calibPrimary} onClick={() => applyCalibration({ mirror: r.mirror, rot: r.rot })}>
+                  Guardar
+                </button>
+              </div>
+            </>)
+          })()}
+        </div>
+      )}
 
       {/* Answer legend */}
       <div style={styles.legend}>
@@ -683,6 +832,26 @@ const styles = {
   borderRadius: 6, padding: '.3rem .55rem', fontSize: '.7rem', fontWeight: 700,
   cursor: 'pointer', whiteSpace: 'nowrap',
 },
+calibBtn: {
+  background: 'transparent', border: '1px solid #2a2a30', borderRadius: 6,
+  padding: '.25rem .45rem', fontSize: '.8rem', cursor: 'pointer',
+},
+calibSheet: {
+  background: '#141417', borderTop: '2px solid #2E9DF2', borderBottom: '1px solid #2a2a30',
+  padding: '.85rem 1rem', fontSize: '.85rem',
+},
+calibText: { color: '#bbb', fontSize: '.8rem', lineHeight: 1.45, margin: '0 0 .7rem' },
+calibBtns: { display: 'flex', gap: '.5rem', justifyContent: 'flex-end' },
+calibPrimary: {
+  background: '#2E9DF2', border: 'none', color: '#fff', borderRadius: 6,
+  padding: '.45rem .9rem', fontWeight: 700, fontSize: '.8rem', cursor: 'pointer',
+},
+calibGhost: {
+  background: 'transparent', border: '1px solid #2a2a30', color: '#e8e8ec', borderRadius: 6,
+  padding: '.45rem .9rem', fontSize: '.8rem', cursor: 'pointer',
+},
+calibBar: { height: 6, background: '#2a2a30', borderRadius: 3, overflow: 'hidden', marginBottom: '.7rem' },
+calibFill: { height: '100%', background: '#2E9DF2', transition: 'width .2s' },
 warnBar: {
   background: 'rgba(255,165,0,.15)', color: '#ffa500', fontSize: '.75rem',
   padding: '.45rem 1rem', borderBottom: '1px solid rgba(255,165,0,.3)', textAlign: 'center',
