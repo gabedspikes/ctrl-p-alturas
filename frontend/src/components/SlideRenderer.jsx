@@ -1,4 +1,5 @@
 import React from 'react'
+import { useTheme, SLIDE_BG } from '../lib/theme'
 
 const ANS_COLORS = {
   A: { bg: 'rgba(34,197,94,0.15)',  border: '#22c55e', text: '#22c55e', label: '#22c55e' },
@@ -7,14 +8,8 @@ const ANS_COLORS = {
   D: { bg: 'rgba(239,68,68,0.15)',  border: '#ef4444', text: '#ef4444', label: '#ef4444' },
 }
 
-function isColorDark(hex = '#1a1a20') {
-  try {
-    const r = parseInt(hex.slice(1,3),16)
-    const g = parseInt(hex.slice(3,5),16)
-    const b = parseInt(hex.slice(5,7),16)
-    return (r*299 + g*587 + b*114) / 1000 < 128
-  } catch { return true }
-}
+// Fondo de la slide según el modo de la página (ya no se elige por slide;
+// la columna bg_color solo registra el modo en que se guardó y no se usa aquí).
 
 /**
  * SlideRenderer — shared component used by editor preview, session view, and scan page.
@@ -24,6 +19,8 @@ function isColorDark(hex = '#1a1a20') {
  *   height        — container height in px (default 405)
  *   showCorrect   — highlight correct answer (default false)
  *   compact       — smaller text for thumbnail use (default false)
+ *   theme         — 'dark' | 'light' para forzar un modo; por defecto sigue
+ *                   el modo claro/oscuro que el profesor tiene en la página
  */
 export default function SlideRenderer({
   slide,
@@ -33,11 +30,13 @@ export default function SlideRenderer({
   compact = false,
   tally = null,        // { A:n, B:n, C:n, D:n } or null to hide
   totalStudents = 0,   // denominator for the percentage
+  theme,
 }) {
+  const pageTheme = useTheme()
   if (!slide) return null
 
-  const bg = slide.bg_color || '#1a1a20'
-  const dark = isColorDark(bg)
+  const dark = (theme || pageTheme) === 'dark'
+  const bg = dark ? SLIDE_BG.dark : SLIDE_BG.light
   const textColor = dark ? '#e8e8ec' : '#1a1a2e'
   const mutedColor = dark ? 'rgba(255,255,255,0.4)' : 'rgba(0,0,0,0.35)'
   const scale = width / 720

@@ -212,7 +212,7 @@ label { display: block; font-size: .75rem; color: var(--muted);
 /* Two columns: slide + controls + optional results on the left (wide),
    compact always-visible student status on the right (narrow, own scroll). */
 .session-layout {
-  display: grid; grid-template-columns: 1fr 520px;  /* un poco más ancho */
+  display: grid; grid-template-columns: 1fr 280px;  /* lista de alumnos angosta: más espacio para la slide */
   gap: 1.5rem; padding: 1.5rem;
   min-height: calc(100vh - 57px);
   align-items: stretch;   /* antes: start */
@@ -222,8 +222,9 @@ label { display: block; font-size: .75rem; color: var(--muted);
    sidebar's own height so the page itself never needs to scroll to see
    every student. */
 .student-grid-compact {
-  display: grid; grid-template-columns: repeat(2, 1fr);
-  gap: .4rem;
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: .25rem;
+  align-content: start;
   overflow-y: auto;
   flex: 1;
   min-height: 0;
@@ -252,16 +253,18 @@ label { display: block; font-size: .75rem; color: var(--muted);
   transition: background .2s ease, border-color .2s ease;
 }
 .student-cell.compact {
-  padding: .35rem .5rem;
+  padding: .2rem .35rem;
   font-size: .72rem;
-  gap: .3rem;
+  gap: .25rem;
+  border-width: 1px;
+  line-height: 1.2;
 }
 .student-cell .card-no {
   font-family: var(--mono); font-size: .7rem; color: var(--muted);
   flex-shrink: 0;
 }
 .student-cell.compact .card-no {
-  font-size: .62rem;
+  font-size: .6rem;
 }
 .student-cell .student-name {
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;

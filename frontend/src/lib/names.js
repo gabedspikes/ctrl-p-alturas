@@ -1,8 +1,8 @@
 // Nombre corto para listas: iniciales de los nombres + primer apellido.
-//   "Tomás Baltazar Toledo Stuardo" → "T. B. Toledo"
-//   "Antonia Sofía Aedo Dunn"       → "A. S. Aedo"
+//   "Tomás Baltazar Toledo Stuardo" → "T.B. Toledo"
+//   "Antonia Sofía Aedo Dunn"       → "A.S. Aedo"
 //   "Juan Pérez"                    → "J. Pérez"
-//   "María José de la Fuente Soto"  → "M. J. de la Fuente"
+//   "María José de la Fuente Soto"  → "M.J. de la Fuente"
 // Supone el formato que usa el colegio: nombres primero y luego los dos
 // apellidos. Las partículas (de, del, la, san…) se unen al apellido que sigue.
 const PARTICLES = new Set(['de', 'del', 'la', 'las', 'los', 'san', 'santa', 'y', 'van', 'von', 'da', 'di', 'mc'])
@@ -29,5 +29,6 @@ export function shortName(full) {
   const surnameIdx = parts.length === 2 ? 1 : parts.length - 2
   // "de los Ángeles" → inicial de la palabra principal (Á), no de la partícula
   const initials = parts.slice(0, surnameIdx).map(p => p.split(' ').pop()[0].toUpperCase() + '.')
-  return [...initials, parts[surnameIdx]].join(' ')
+  // Iniciales juntas ("T.B.") para ocupar menos ancho
+  return initials.join('') + ' ' + parts[surnameIdx]
 }

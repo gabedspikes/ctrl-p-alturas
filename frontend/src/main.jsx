@@ -34,6 +34,10 @@ function Protected({ children }) {
   return children
 }
 
+// Aplica el modo guardado al cargar, también en páginas sin el menú
+// (sesión, editor), que antes partían siempre en oscuro al abrirlas directo.
+document.documentElement.setAttribute('data-theme', localStorage.getItem('theme') || 'dark')
+
 // ── Nav layout ────────────────────────────────────────────
 function Layout({ children }) {
   const { user, signOut } = useAuth()

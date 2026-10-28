@@ -5,18 +5,9 @@ import SlideRenderer from '../components/SlideRenderer'
 import { ArrowLeft, Plus, Trash2, ImageIcon, Save, X } from 'lucide-react'
 import imageCompression from 'browser-image-compression'
 import { logError, friendlyError } from '../lib/errorLog'
+import { getTheme, SLIDE_BG } from '../lib/theme'
 
 const ANS_COLORS = { A:'#22c55e', B:'#3b82f6', C:'#f97316', D:'#ef4444' }
-
-const BG_PRESETS = [
-  { color: '#1a1a20', label: 'Dark'        },
-  { color: '#ffffff', label: 'White'       },
-  { color: '#f8f9fa', label: 'Light grey'  },
-  { color: '#0f172a', label: 'Navy'        },
-  { color: '#1e3a5f', label: 'Blue'        },
-  { color: '#14532d', label: 'Green'       },
-  { color: '#450a0a', label: 'Dark red'    },
-]
 
 // Tamaños de texto. Los pasos crecen hacia arriba (L y XL) para que en un
 // televisor la diferencia se note. Antes: S 0.85, M 1, L 1.2, XL 1.4.
@@ -28,22 +19,12 @@ function nearestTextSize(v = 1) {
 // Tamaño máximo de la imagen original elegida (antes de comprimir).
 const MAX_IMAGE_MB = 10
 
-function isColorDark(hex = '#1a1a20') {
-  try {
-    const r = parseInt(hex.slice(1,3),16)
-    const g = parseInt(hex.slice(3,5),16)
-    const b = parseInt(hex.slice(5,7),16)
-    return (r*299 + g*587 + b*114) / 1000 < 128
-  } catch { return true }
-}
-
 // ── Campos editables de una slide ─────────────────────────
 const EMPTY_SLIDE_FIELDS = {
   question_text: '',
   answer_a: '', answer_b: '', answer_c: '', answer_d: '',
   answer_a_image: null, answer_b_image: null, answer_c_image: null, answer_d_image: null,
   correct_answer: null,
-  bg_color: '#1a1a20',
   image_url: null,
   text_scale: 1,
   answer_layout: 'list',
@@ -61,7 +42,6 @@ function fromDb(row) {
   for (const f of FIELD_NAMES) s[f] = row[f] ?? EMPTY_SLIDE_FIELDS[f]
   s.text_scale    = row.text_scale    || 1
   s.answer_layout = row.answer_layout || 'list'
-  s.bg_color      = row.bg_color      || '#1a1a20'
   return s
 }
 const newSlide = () => ({ id: null, _key: newKey(), ...EMPTY_SLIDE_FIELDS })
@@ -315,7 +295,8 @@ export default function SlideEditorPage() {
           const v = s[f]
           row[f] = urlMap.get(v) ?? (v === '' ? null : v)
         }
-        row.bg_color      = row.bg_color      || '#1a1a20'
+        // Registra el modo (claro/oscuro) en que el profesor guardó la slide
+        row.bg_color      = SLIDE_BG[getTheme()]
         row.text_scale    = row.text_scale    || 1
         row.answer_layout = row.answer_layout || 'list'
         return row
@@ -681,41 +662,6 @@ export default function SlideEditorPage() {
             </div>
           </div>
 
-          {/* Background color */}
-          <div style={{ padding:'1rem' }}>
-            <label style={{ display:'block', fontSize:'.7rem', color:'var(--muted)',
-              fontWeight:700, letterSpacing:'.1em', marginBottom:'.75rem' }}>
-              FONDO
-            </label>
-            <div style={{ display:'flex', gap:'.4rem', flexWrap:'wrap' }}>
-              {BG_PRESETS.map(({ color, label }) => (
-                <button
-                  key={color}
-                  onClick={() => updateDraft('bg_color', color)}
-                  title={label}
-                  style={{
-                    width:28, height:28, borderRadius:5, cursor:'pointer',
-                    background:color, flexShrink:0,
-                    border: draft.bg_color === color
-                      ? '3px solid var(--accent)'
-                      : '2px solid var(--border)',
-                    transition:'border .1s',
-                  }}
-                />
-              ))}
-              <input
-                type="color"
-                value={draft.bg_color}
-                onChange={e => updateDraft('bg_color', e.target.value)}
-                style={{ width:28, height:28, padding:0, border:'2px solid var(--border)',
-                  borderRadius:5, cursor:'pointer', background:'none' }}
-                title="Custom color"
-              />
-            </div>
-            <p style={{ fontSize:'.7rem', color:'var(--muted)', marginTop:'.5rem' }}>
-              {isColorDark(draft.bg_color) ? '🌙 Dark background' : '☀️ Light background'}
-            </p>
-          </div>
         </div>
       </div>
 

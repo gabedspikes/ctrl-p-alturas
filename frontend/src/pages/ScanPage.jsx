@@ -628,6 +628,7 @@ if (student && cooled && !alreadyScanned && slideReadyRef.current) {
             height={120}
             showCorrect={false}
             compact={true}
+            theme="dark"
           />
         </div>
       )}
