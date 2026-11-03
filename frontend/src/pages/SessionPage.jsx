@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from 'react'
+import React, { useEffect, useState, useRef, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { logError, friendlyError } from '../lib/errorLog'
@@ -77,6 +77,13 @@ export default function SessionPage() {
   const [present, setPresent] = useState(false)
   const [viewport, setViewport] = useState({ w: window.innerWidth, h: window.innerHeight })
   const [controlsVisible, setControlsVisible] = useState(true)
+  // Lista de alumnos al costado en pantalla completa (se recuerda en este computador)
+  const [showRoster, setShowRoster] = useState(() => {
+    try { return localStorage.getItem('present.roster') === '1' } catch { return false }
+  })
+  useEffect(() => {
+    try { localStorage.setItem('present.roster', showRoster ? '1' : '0') } catch { /* sin storage */ }
+  }, [showRoster])
   const hideTimerRef = useRef(null)
 
   function enterPresent() {
@@ -123,25 +130,28 @@ export default function SessionPage() {
       else if (['ArrowLeft', 'PageUp'].includes(e.key)) { e.preventDefault(); goTo(currentIdx - 1) }
       else if (e.key === 'Escape') exitPresent()
       else if (e.key === 'p' || e.key === 'P') setShowStats(v => !v)
+      else if (e.key === 'a' || e.key === 'A') setShowRoster(v => !v)
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   })
 
   // Measure the slide stage to keep the slide big but proportional (16:9)
-  const stageRef = useRef(null)
+  // Ref "callback": se conecta cuando el contenedor aparece de verdad. Antes era
+  // un useEffect que corría al montar, mientras se mostraba "Cargando…" y el
+  // contenedor no existía; nunca se medía y la slide quedaba fija en 720 px,
+  // dejando un espacio en blanco a la derecha.
   const [stageWidth, setStageWidth] = useState(720)
-
-  useEffect(() => {
-    if (!stageRef.current) return
-    const el = stageRef.current
+  const stageObserver = useRef(null)
+  const stageRef = useCallback(el => {
+    stageObserver.current?.disconnect()
+    stageObserver.current = null
+    if (!el) return
     const ro = new ResizeObserver(entries => {
-      for (const entry of entries) {
-        setStageWidth(Math.round(entry.contentRect.width))
-      }
+      for (const entry of entries) setStageWidth(Math.round(entry.contentRect.width))
     })
     ro.observe(el)
-    return () => ro.disconnect()
+    stageObserver.current = ro
   }, [])
 
   useEffect(() => {
@@ -397,25 +407,69 @@ useEffect(() => {
 
       {/* ── Modo presentación ─────────────────────────── */}
       {present && currentSlide && (() => {
-        // 16:9 lo más grande posible dentro de la pantalla
-        const fw = Math.min(viewport.w, Math.round(viewport.h * 16 / 9))
+        // Con la lista de alumnos, esta ocupa una columna a la derecha y la slide
+        // usa el resto. La slide siempre es 16:9, lo más grande posible.
+        const rosterW = showRoster ? Math.round(Math.min(420, Math.max(260, viewport.w * 0.2))) : 0
+        const fw = Math.min(viewport.w - rosterW, Math.round(viewport.h * 16 / 9))
         const fh = Math.round(fw * 9 / 16)
-        const answeredHere = responses.filter(r => r.slide_id === currentSlide.id).length
+        const answeredIds = new Set(responses.filter(r => r.slide_id === currentSlide.id).map(r => r.student_id))
+        const answeredHere = answeredIds.size
+        // Tamaño de letra de la lista según cuántas filas deben caber en la altura
+        const rows = Math.max(1, Math.ceil(sortedStudents.length / 2))
+        const rowH = (viewport.h - 70) / rows
+        const rosterFont = Math.max(11, Math.min(20, rowH * 0.42))
         return (
           <div onMouseMove={pokeControls} onClick={pokeControls}
             style={{ position:'fixed', inset:0, zIndex:1000, background:'#000',
               display:'flex', alignItems:'center', justifyContent:'center',
               cursor: controlsVisible ? 'default' : 'none' }}>
-            <SlideRenderer
-              slide={currentSlide}
-              width={fw}
-              height={fh}
-              showCorrect={revealCorrect}
-              tally={showStats ? tally : null}
-              totalStudents={totalStudents}
-            />
+            <div style={{ flex:1, minWidth:0, height:'100%', display:'flex', alignItems:'center', justifyContent:'center' }}>
+              <SlideRenderer
+                slide={currentSlide}
+                width={fw}
+                height={fh}
+                showCorrect={revealCorrect}
+                tally={showStats ? tally : null}
+                totalStudents={totalStudents}
+              />
+            </div>
+
+            {showRoster && (
+              <div style={{
+                width: rosterW, flexShrink:0, height:'100%', boxSizing:'border-box',
+                background:'#141417', borderLeft:'1px solid #2a2a30',
+                padding:'14px 12px', display:'flex', flexDirection:'column', gap:8, color:'#e8e8ec',
+              }}>
+                <div style={{ fontSize: rosterFont, fontWeight:800, letterSpacing:'.04em' }}>
+                  Respondieron <span style={{ color:'#2ed573' }}>{answeredHere}</span>
+                  <span style={{ color:'#777' }}> / {totalStudents}</span>
+                </div>
+                <div style={{ flex:1, minHeight:0, overflow:'hidden', display:'grid',
+                  gridTemplateColumns:'repeat(2, minmax(0, 1fr))', gridAutoRows:'1fr', gap:4 }}>
+                  {sortedStudents.map(st => {
+                    const done = answeredIds.has(st.id)
+                    return (
+                      <div key={st.id} style={{
+                        display:'flex', alignItems:'center', gap:6, minWidth:0, padding:'0 6px',
+                        borderRadius:6, fontSize: rosterFont,
+                        border:`1px solid ${done ? '#2ed573' : '#2a2a30'}`,
+                        background: done ? 'rgba(46,213,115,.18)' : 'rgba(255,255,255,.03)',
+                      }}>
+                        <span style={{ fontFamily:'var(--mono)', fontSize:'.75em', color: done ? '#2ed573' : '#777', flexShrink:0 }}>
+                          #{st.card_id}
+                        </span>
+                        <span style={{ overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                          {shortName(st.name)}
+                        </span>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
             <div style={{
-              position:'fixed', bottom:20, left:'50%', transform:'translateX(-50%)',
+              // centrada sobre la slide (no sobre la lista de alumnos)
+              position:'fixed', bottom:20, left:(viewport.w - rosterW) / 2, transform:'translateX(-50%)',
               display:'flex', alignItems:'center', gap:'.6rem', padding:'.5rem .75rem',
               background:'rgba(20,20,23,.88)', border:'1px solid rgba(255,255,255,.12)', borderRadius:10,
               color:'#e8e8ec', fontSize:'.85rem',
@@ -431,6 +485,9 @@ useEffect(() => {
               <span title="Alumnos que ya respondieron esta pregunta">{answeredHere}/{totalStudents} respondieron</span>
               <button className="btn btn-ghost btn-sm" onClick={() => setShowStats(v => !v)} title="Mostrar u ocultar porcentajes (P)">
                 {showStats ? 'Ocultar %' : 'Mostrar %'}
+              </button>
+              <button className="btn btn-ghost btn-sm" onClick={() => setShowRoster(v => !v)} title="Mostrar u ocultar la lista de alumnos (A)">
+                {showRoster ? 'Ocultar alumnos' : 'Ver alumnos'}
               </button>
               <button className="btn btn-ghost btn-sm" onClick={exitPresent} title="Salir (Esc)">
                 <X size={14}/> Salir
