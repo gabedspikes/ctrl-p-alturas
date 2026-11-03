@@ -1,11 +1,23 @@
 import React from 'react'
 import { useTheme, SLIDE_BG } from '../lib/theme'
 
+// bg = relleno suave de cada caja (siempre visible, para que los más chicos
+// asocien la caja con su letra); strong = relleno de la respuesta correcta.
 const ANS_COLORS = {
-  A: { bg: 'rgba(34,197,94,0.15)',  border: '#22c55e', text: '#22c55e', label: '#22c55e' },
-  B: { bg: 'rgba(59,130,246,0.15)', border: '#3b82f6', text: '#3b82f6', label: '#3b82f6' },
-  C: { bg: 'rgba(249,115,22,0.15)', border: '#f97316', text: '#f97316', label: '#f97316' },
-  D: { bg: 'rgba(239,68,68,0.15)',  border: '#ef4444', text: '#ef4444', label: '#ef4444' },
+  A: { bg: 'rgba(34,197,94,0.14)',  strong: 'rgba(34,197,94,0.38)',  border: '#22c55e', text: '#22c55e', label: '#22c55e' },
+  B: { bg: 'rgba(59,130,246,0.14)', strong: 'rgba(59,130,246,0.38)', border: '#3b82f6', text: '#3b82f6', label: '#3b82f6' },
+  C: { bg: 'rgba(249,115,22,0.14)', strong: 'rgba(249,115,22,0.38)', border: '#f97316', text: '#f97316', label: '#f97316' },
+  D: { bg: 'rgba(239,68,68,0.14)',  strong: 'rgba(239,68,68,0.38)',  border: '#ef4444', text: '#ef4444', label: '#ef4444' },
+}
+
+// Caja de una alternativa: borde y relleno del color de su letra.
+// La correcta (al revelar) se distingue con relleno más fuerte y borde más grueso.
+function answerBox(col, isCorrect, compact, scale) {
+  const w = compact ? 1 : Math.max(2, 2.5 * scale)
+  return {
+    background: isCorrect ? col.strong : col.bg,
+    border: `${isCorrect ? w * 2 : w}px solid ${col.border}`,
+  }
 }
 
 // Fondo de la slide según el modo de la página (ya no se elige por slide;
@@ -155,8 +167,7 @@ export default function SlideRenderer({
               <div key={letter} style={{
                 display: 'flex', alignItems: 'center',
                 gap: compact ? 5 : Math.max(6, 10*scale),
-                background: isCorrect ? col.bg : dark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.04)',
-                border: `${compact ? 1 : 1.5}px solid ${isCorrect ? col.border : dark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)'}`,
+                ...answerBox(col, isCorrect, compact, scale),
                 borderRadius: 6,
                 padding: compact ? '3px 6px' : `${Math.max(6, 10*scale)}px ${Math.max(8, 14*scale)}px`,
                 transition: 'all .2s',
@@ -267,8 +278,7 @@ export default function SlideRenderer({
               <div key={letter} style={{
                 display: 'flex', alignItems: 'center',
                 gap: compact ? 5 : Math.max(6, 10*scale),
-                background: isCorrect ? col.bg : dark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.04)',
-                border: `${compact ? 1 : 1.5}px solid ${isCorrect ? col.border : dark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)'}`,
+                ...answerBox(col, isCorrect, compact, scale),
                 borderRadius: 6,
                 padding: compact ? '3px 6px' : `${Math.max(6, 10*scale)}px ${Math.max(8, 14*scale)}px`,
                 transition: 'all .2s',
@@ -352,8 +362,7 @@ export default function SlideRenderer({
                 display: 'flex', flexDirection: 'column', minHeight: 0,
                 alignItems: 'center', justifyContent: 'center',
                 gap: compact ? 3 : Math.max(4, 6*scale),
-                background: isCorrect ? col.bg : dark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.04)',
-                border: `${compact ? 1 : 1.5}px solid ${isCorrect ? col.border : dark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)'}`,
+                ...answerBox(col, isCorrect, compact, scale),
                 borderRadius: 6,
                 padding: compact ? 4 : Math.max(6, 10*scale),
                 overflow: 'hidden',
