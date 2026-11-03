@@ -16,6 +16,7 @@ import InstallPrompt from './components/InstallPrompt'
 import ScanEntryPage from './pages/ScanEntryPage'
 import ErrorBoundary from './components/ErrorBoundary'
 import { installGlobalErrorHandlers } from './lib/errorLog'
+import { Sun, Moon } from 'lucide-react'
 
 installGlobalErrorHandlers()
 
@@ -60,11 +61,14 @@ function Layout({ children }) {
           <NavLink to="/scan" className={({isActive}) => isActive ? 'active' : ''}>Escanear</NavLink>
         </div>
         <div style={{ marginLeft:'auto', display:'flex', alignItems:'center', gap:'.75rem' }}>
+          {/* Muestra el modo al que se cambia, con ícono + texto */}
           <button className="btn btn-ghost btn-sm"
             onClick={() => setTheme(t => t === 'dark' ? 'light' : 'dark')}
-            title="Cambiar modo Oscuro/Modo Claro"
-            style={{ fontSize:'1rem', padding:'.3rem .5rem' }}>
-            {theme === 'dark' ? 'LM' : 'DM'}
+            title={theme === 'dark' ? 'Cambiar a modo claro' : 'Cambiar a modo oscuro'}
+            style={{ display:'inline-flex', alignItems:'center', gap:'.35rem', whiteSpace:'nowrap' }}>
+            {theme === 'dark'
+              ? <><Sun size={14}/> Modo claro</>
+              : <><Moon size={14}/> Modo oscuro</>}
           </button>
           <span style={{ fontSize:'.75rem', color:'var(--muted)', maxWidth:180,
             overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>

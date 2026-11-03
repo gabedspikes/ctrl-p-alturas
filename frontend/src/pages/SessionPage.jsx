@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { logError, friendlyError } from '../lib/errorLog'
 import { useOnline } from '../lib/useOnline'
-import { ChevronLeft, ChevronRight, Smartphone } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Smartphone, Maximize, X } from 'lucide-react'
 import SlideRenderer from '../components/SlideRenderer'
 import { shortName } from '../lib/names'
 
@@ -68,6 +68,65 @@ export default function SessionPage() {
   const [loadErr, setLoadErr] = useState('')
   const [rtDown, setRtDown] = useState(false)
   const online = useOnline()
+
+  // ── Modo presentación (pantalla completa para el televisor) ──
+  // La slide ocupa toda la pantalla (16:9, con franjas negras si sobra) y todo
+  // crece en proporción: texto, imágenes y respuestas. Se navega con ← →,
+  // Re Pág / Av Pág (presentadores inalámbricos) o la barra que aparece al
+  // mover el mouse. Esc sale.
+  const [present, setPresent] = useState(false)
+  const [viewport, setViewport] = useState({ w: window.innerWidth, h: window.innerHeight })
+  const [controlsVisible, setControlsVisible] = useState(true)
+  const hideTimerRef = useRef(null)
+
+  function enterPresent() {
+    setPresent(true)
+    // Pantalla completa del navegador (oculta pestañas y barra de direcciones).
+    // Si el navegador no lo permite, igual queda la slide ocupando la ventana.
+    document.documentElement.requestFullscreen?.().catch(() => {})
+  }
+  function exitPresent() {
+    setPresent(false)
+    if (document.fullscreenElement) document.exitFullscreen?.().catch(() => {})
+  }
+
+  useEffect(() => {
+    if (!present) return
+    const onResize = () => setViewport({ w: window.innerWidth, h: window.innerHeight })
+    // Si se sale de la pantalla completa con Esc (lo maneja el navegador), salir también del modo
+    const onFs = () => { if (!document.fullscreenElement) setPresent(false) }
+    onResize()
+    window.addEventListener('resize', onResize)
+    document.addEventListener('fullscreenchange', onFs)
+    return () => {
+      window.removeEventListener('resize', onResize)
+      document.removeEventListener('fullscreenchange', onFs)
+    }
+  }, [present])
+
+  // Barra de controles: aparece al mover el mouse y se oculta a los 2.5 s
+  function pokeControls() {
+    setControlsVisible(true)
+    clearTimeout(hideTimerRef.current)
+    hideTimerRef.current = setTimeout(() => setControlsVisible(false), 2500)
+  }
+  useEffect(() => {
+    if (present) pokeControls()
+    return () => clearTimeout(hideTimerRef.current)
+  }, [present])
+
+  // Teclado (se vuelve a registrar en cada render para usar el índice actual)
+  useEffect(() => {
+    if (!present) return
+    function onKey(e) {
+      if (['ArrowRight', 'PageDown', ' '].includes(e.key)) { e.preventDefault(); goTo(currentIdx + 1) }
+      else if (['ArrowLeft', 'PageUp'].includes(e.key)) { e.preventDefault(); goTo(currentIdx - 1) }
+      else if (e.key === 'Escape') exitPresent()
+      else if (e.key === 'p' || e.key === 'P') setShowStats(v => !v)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  })
 
   // Measure the slide stage to keep the slide big but proportional (16:9)
   const stageRef = useRef(null)
@@ -336,6 +395,51 @@ useEffect(() => {
         </div>
       )}
 
+      {/* ── Modo presentación ─────────────────────────── */}
+      {present && currentSlide && (() => {
+        // 16:9 lo más grande posible dentro de la pantalla
+        const fw = Math.min(viewport.w, Math.round(viewport.h * 16 / 9))
+        const fh = Math.round(fw * 9 / 16)
+        const answeredHere = responses.filter(r => r.slide_id === currentSlide.id).length
+        return (
+          <div onMouseMove={pokeControls} onClick={pokeControls}
+            style={{ position:'fixed', inset:0, zIndex:1000, background:'#000',
+              display:'flex', alignItems:'center', justifyContent:'center',
+              cursor: controlsVisible ? 'default' : 'none' }}>
+            <SlideRenderer
+              slide={currentSlide}
+              width={fw}
+              height={fh}
+              showCorrect={revealCorrect}
+              tally={showStats ? tally : null}
+              totalStudents={totalStudents}
+            />
+            <div style={{
+              position:'fixed', bottom:20, left:'50%', transform:'translateX(-50%)',
+              display:'flex', alignItems:'center', gap:'.6rem', padding:'.5rem .75rem',
+              background:'rgba(20,20,23,.88)', border:'1px solid rgba(255,255,255,.12)', borderRadius:10,
+              color:'#e8e8ec', fontSize:'.85rem',
+              opacity: controlsVisible ? 1 : 0, transition:'opacity .3s',
+              pointerEvents: controlsVisible ? 'auto' : 'none',
+            }}>
+              <button className="btn btn-ghost btn-sm" onClick={() => goTo(currentIdx - 1)} disabled={currentIdx === 0}
+                title="Anterior (←)"><ChevronLeft size={16}/></button>
+              <span style={{ fontFamily:'var(--mono)' }}>{currentIdx + 1} / {slides.length}</span>
+              <button className="btn btn-ghost btn-sm" onClick={() => goTo(currentIdx + 1)} disabled={currentIdx === slides.length - 1}
+                title="Siguiente (→)"><ChevronRight size={16}/></button>
+              <span style={{ color:'#888', margin:'0 .25rem' }}>·</span>
+              <span title="Alumnos que ya respondieron esta pregunta">{answeredHere}/{totalStudents} respondieron</span>
+              <button className="btn btn-ghost btn-sm" onClick={() => setShowStats(v => !v)} title="Mostrar u ocultar porcentajes (P)">
+                {showStats ? 'Ocultar %' : 'Mostrar %'}
+              </button>
+              <button className="btn btn-ghost btn-sm" onClick={exitPresent} title="Salir (Esc)">
+                <X size={14}/> Salir
+              </button>
+            </div>
+          </div>
+        )
+      })()}
+
       <div className="session-layout">
         {/* Left: slide + controls + optional results */}
         <div style={{ display:'flex', flexDirection:'column', gap:'.75rem', minWidth:0 }}>
@@ -347,6 +451,10 @@ useEffect(() => {
               onClick={() => setShowStats(v => !v)}
             >
               {showStats ? 'Ocultar %' : 'Mostrar %'}
+            </button>
+            <button className="btn btn-primary btn-sm" onClick={enterPresent}
+              title="Mostrar la pregunta en pantalla completa (para el televisor)" style={{ marginLeft:'.5rem' }}>
+              <Maximize size={13}/> Pantalla completa
             </button>
           </div>
 
