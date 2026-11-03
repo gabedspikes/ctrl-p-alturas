@@ -197,7 +197,7 @@ export default function SlideEditorPage() {
         maxSizeMB: 0.5,
         maxWidthOrHeight: 1600,
         useWebWorker: true,
-        initialQuality: 0.8,
+        initialQuality: 0.9,   // 0.9: fórmulas y gráficos (líneas finas) se ven nítidos
         fileType: 'image/webp',
       })
       // Conserva el nombre original para armar la ruta al subir
@@ -254,6 +254,40 @@ export default function SlideEditorPage() {
   function removeAnswerImage(letter) {
     removeImage(`answer_${letter.toLowerCase()}_image`)
   }
+
+  // Imagen de la pregunta (fórmulas, gráficos, figuras): va debajo del texto
+  async function handleQuestionImage(file) {
+    if (!file || !activeSlide) return
+    setAnsUploading(u => ({ ...u, Q: true }))
+    await setImage(activeSlide._key, 'image_url', file)
+    setAnsUploading(u => ({ ...u, Q: false }))
+  }
+
+  // ── Pegar imágenes (Ctrl+V) ──────────────────────────────
+  // La imagen va a la pregunta o a la respuesta donde está el cursor
+  // (atributo data-paste-image). Dentro de un campo de texto, si el
+  // portapapeles también trae texto, se pega el texto como siempre: Word copia
+  // una "foto" del texto junto al texto, y no queremos que eso se vuelva imagen.
+  // Para forzar la imagen se usa el recuadro "pegar aquí" de la pregunta.
+  useEffect(() => {
+    function onPaste(e) {
+      if (saving || leaveOpen) return
+      const items = [...(e.clipboardData?.items || [])]
+      const item = items.find(i => i.kind === 'file' && i.type.startsWith('image/'))
+      if (!item) return
+      const el = document.activeElement
+      const inTextField = el && (el.tagName === 'TEXTAREA' || el.tagName === 'INPUT')
+      if (inTextField && e.clipboardData.getData('text/plain').trim()) return
+      const file = item.getAsFile()
+      if (!file) return
+      e.preventDefault()
+      const target = el?.closest?.('[data-paste-image]')?.dataset.pasteImage || 'Q'
+      if (target === 'Q') handleQuestionImage(file)
+      else handleAnswerImageUpload(target, file)
+    }
+    document.addEventListener('paste', onPaste)
+    return () => document.removeEventListener('paste', onPaste)
+  })
 
   async function uploadFile(file) {
     const ext  = file.name.split('.').pop() || 'webp'
@@ -528,10 +562,10 @@ export default function SlideEditorPage() {
         }}>
 
           {/* Question */}
-          <div style={{ padding:'1rem', borderBottom:'1px solid var(--border)' }}>
+          <div data-paste-image="Q" style={{ padding:'1rem', borderBottom:'1px solid var(--border)' }}>
             <label style={{ display:'block', fontSize:'.7rem', color:'var(--muted)',
               fontWeight:700, letterSpacing:'.1em', marginBottom:'.5rem' }}>
-              QUESTION
+              PREGUNTA
             </label>
             <textarea
               rows={4}
@@ -540,6 +574,54 @@ export default function SlideEditorPage() {
               placeholder="Type your question here…"
               style={{ resize:'vertical', fontSize:'.875rem', lineHeight:1.5 }}
             />
+
+            {/* Imagen de la pregunta: elegir archivo, arrastrar, o clic + Ctrl+V */}
+            <div
+              tabIndex={0}
+              className="paste-zone"
+              title="Haz clic aquí y pega una imagen (Ctrl+V)"
+              onDragOver={e => e.preventDefault()}
+              onDrop={e => { e.preventDefault(); handleQuestionImage(e.dataTransfer.files?.[0]) }}
+              style={{
+                marginTop:'.6rem', padding:'.55rem', borderRadius:6,
+                border:'1px dashed var(--border)', outline:'none',
+                display:'flex', alignItems:'center', gap:'.6rem',
+                fontSize:'.72rem', color:'var(--muted)',
+              }}>
+              {ansUploading.Q ? (
+                <span>Procesando imagen…</span>
+              ) : draft.image_url ? (
+                <>
+                  <img src={draft.image_url} alt="Imagen de la pregunta"
+                    style={{ height:56, maxWidth:130, objectFit:'contain', borderRadius:4,
+                      background:'#fff', border:'1px solid var(--border)' }}/>
+                  <div style={{ display:'flex', flexDirection:'column', gap:'.3rem' }}>
+                    <label style={{ cursor:'pointer', textDecoration:'underline' }}>
+                      Cambiar
+                      <input type="file" accept="image/*" style={{ display:'none' }}
+                        onChange={e => { handleQuestionImage(e.target.files?.[0]); e.target.value = '' }}/>
+                    </label>
+                    <button className="btn btn-ghost btn-sm" onClick={() => removeImage('image_url')}
+                      style={{ fontSize:'.7rem', padding:'.2rem .4rem' }}>
+                      <X size={11}/> Quitar
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <ImageIcon size={16} style={{ opacity:.6, flexShrink:0 }}/>
+                  <span>
+                    Imagen (fórmula, gráfico…):{' '}
+                    <label style={{ cursor:'pointer', textDecoration:'underline', color:'var(--text)' }}>
+                      elegir archivo
+                      <input type="file" accept="image/*" style={{ display:'none' }}
+                        onChange={e => { handleQuestionImage(e.target.files?.[0]); e.target.value = '' }}/>
+                    </label>
+                    , arrastrarla aquí, o hacer clic aquí y pegar con <b>Ctrl+V</b>
+                  </span>
+                </>
+              )}
+            </div>
           </div>
 
           {/* Answers */}
@@ -553,7 +635,7 @@ export default function SlideEditorPage() {
               const isCorrect = draft.correct_answer === l
               const imgUrl = draft[`answer_${l.toLowerCase()}_image`]
               return (
-                <div key={l} style={{ marginBottom:'.6rem' }}>
+                <div key={l} data-paste-image={l} style={{ marginBottom:'.6rem' }}>
                   <div style={{ display:'flex', alignItems:'center', gap:'.5rem' }}>
                     <button
                       onClick={() => updateDraft('correct_answer', isCorrect ? null : l)}
@@ -594,12 +676,12 @@ export default function SlideEditorPage() {
                         </button>
                       </>
                     ) : (
-                      <label style={{
+                      <label title="También puedes copiar una imagen y pegarla (Ctrl+V) con el cursor en esta respuesta" style={{
                         display:'inline-flex', alignItems:'center', gap:'.3rem',
                         fontSize:'.7rem', color:'var(--muted)', cursor:'pointer',
                       }}>
                         <ImageIcon size={13} style={{ opacity:.6 }}/>
-                        {ansUploading[l] ? 'Subiendo…' : 'Imagen'}
+                        {ansUploading[l] ? 'Procesando…' : 'Imagen (o Ctrl+V)'}
                         <input type="file" accept="image/*" style={{ display:'none' }}
                           disabled={ansUploading[l]}
                           onChange={e => handleAnswerImageUpload(l, e.target.files?.[0])}/>
@@ -691,6 +773,7 @@ export default function SlideEditorPage() {
       {/* Hover show delete on slide thumbs */}
       <style>{`
         .slide-delete-btn { opacity: 0 !important; }
+        .paste-zone:focus { border-color: var(--accent) !important; border-style: solid !important; }
         div:hover > .slide-delete-btn { opacity: 1 !important; }
       `}</style>
     </div>

@@ -53,6 +53,8 @@ export default function SlideRenderer({
   const hasImage = !!slide.image_url
   const hasQuestion = !!slide.question_text
   const gridLayout = hasAnswers && slide.answer_layout === 'grid'
+  // Imagen de la pregunta + respuestas en lista → lado a lado
+  const sideBySide = hasImage && hasAnswers && !gridLayout
 
   
   const qFontSize = compact
@@ -72,14 +74,15 @@ export default function SlideRenderer({
       fontFamily: "'Syne', sans-serif",
       userSelect: 'none',
     }}>
-      {/* Question area */}
+      {/* Question area (se omite si la pregunta es solo una imagen) */}
+      {(hasQuestion || !hasImage) && (
       <div style={{
         flex: gridLayout ? '0 0 auto' : hasImage ? '0 0 auto' : hasAnswers ? '1 1 auto' : '1',
         padding: compact ? '10px 12px 6px' : `${20*scale}px ${28*scale}px ${12*scale}px`,
         display: 'flex',
         alignItems: hasAnswers || hasImage ? 'flex-start' : 'center',
         justifyContent: 'center',
-        minHeight: compact ? 40 : 80,
+        minHeight: hasImage ? 0 : (compact ? 40 : 80),   // con imagen no se reserva alto extra
       }}>
         {hasQuestion ? (
           <p style={{
@@ -94,40 +97,51 @@ export default function SlideRenderer({
             {slide.question_text}
           </p>
         ) : (
-          <p style={{ color: mutedColor, fontSize: compact ? 9 : 16, margin: 0, fontStyle: 'italic' }}>
-            No question text
-          </p>
+          // Pregunta solo con imagen (p. ej. un ejercicio escaneado): sin aviso
+          hasImage ? null : (
+            <p style={{ color: mutedColor, fontSize: compact ? 9 : 16, margin: 0, fontStyle: 'italic' }}>
+              No question text
+            </p>
+          )
         )}
       </div>
+      )}
 
-      {/* Image */}
+      {/* Imagen + respuestas en lista. Con imagen van lado a lado (imagen a la
+          izquierda, respuestas a la derecha): en 16:9 así el gráfico o la
+          fórmula tiene espacio de verdad. Sin imagen, como siempre. */}
+      {sideBySide ? (
+        <div style={{ flex: '1 1 0', minHeight: 0, display: 'flex', flexDirection: 'row', alignItems: 'stretch' }}>
+      {/* Image — ocupa todo el espacio libre entre la pregunta y las respuestas.
+          Antes tenía un alto fijo en píxeles (140), así que en un televisor se
+          veía chica; ahora crece con la slide, igual que el texto. */}
       {hasImage && (
         <div style={{
-          flex: hasAnswers ? '0 0 auto' : '1',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          padding: compact ? '0 12px' : `0 ${28*scale}px`,
-          maxHeight: compact ? 60 : hasAnswers ? 140 : 260,
-          overflow: 'hidden',
+          flex: '1 1 0',
+          minHeight: compact ? 30 : 60 * scale,
+          position: 'relative',
+          margin: sideBySide
+            ? (compact ? '4px 0 8px 12px' : `${(hasQuestion ? 4 : 20)*scale}px 0 ${20*scale}px ${28*scale}px`)
+            : (compact ? `${hasQuestion ? 0 : 8}px 12px 0` : `${hasQuestion ? 0 : 20*scale}px ${28*scale}px 0`),
         }}>
           <img
             src={slide.image_url}
             alt="Slide"
             style={{
-              maxWidth: '100%',
-              maxHeight: '100%',
+              position: 'absolute', inset: 0,
+              width: '100%', height: '100%',
               objectFit: 'contain',
               borderRadius: 4,
             }}
           />
         </div>
       )}
-
       {/* Answer rows */}
       {hasAnswers && !gridLayout && (
         <div style={{
-          flex: '0 0 auto',
+          flex: sideBySide ? '0 0 46%' : '0 0 auto',
+          minWidth: 0,
+          justifyContent: sideBySide ? 'center' : undefined,
           padding: compact ? '4px 12px 8px' : `${8*scale}px ${28*scale}px ${20*scale}px`,
           display: 'flex',
           flexDirection: 'column',
@@ -207,6 +221,119 @@ export default function SlideRenderer({
           })}
         </div>
       )}
+        </div>
+      ) : (<>
+      {/* Image — ocupa todo el espacio libre entre la pregunta y las respuestas.
+          Antes tenía un alto fijo en píxeles (140), así que en un televisor se
+          veía chica; ahora crece con la slide, igual que el texto. */}
+      {hasImage && (
+        <div style={{
+          flex: '1 1 0',
+          minHeight: compact ? 30 : 60 * scale,
+          position: 'relative',
+          margin: sideBySide
+            ? (compact ? '4px 0 8px 12px' : `${(hasQuestion ? 4 : 20)*scale}px 0 ${20*scale}px ${28*scale}px`)
+            : (compact ? `${hasQuestion ? 0 : 8}px 12px 0` : `${hasQuestion ? 0 : 20*scale}px ${28*scale}px 0`),
+        }}>
+          <img
+            src={slide.image_url}
+            alt="Slide"
+            style={{
+              position: 'absolute', inset: 0,
+              width: '100%', height: '100%',
+              objectFit: 'contain',
+              borderRadius: 4,
+            }}
+          />
+        </div>
+      )}
+
+      {/* Answer rows */}
+      {hasAnswers && !gridLayout && (
+        <div style={{
+          flex: sideBySide ? '0 0 46%' : '0 0 auto',
+          minWidth: 0,
+          justifyContent: sideBySide ? 'center' : undefined,
+          padding: compact ? '4px 12px 8px' : `${8*scale}px ${28*scale}px ${20*scale}px`,
+          display: 'flex',
+          flexDirection: 'column',
+          gap: compact ? 3 : Math.max(4, 8*scale),
+        }}>
+          {answers.map(({ letter, text, image }) => {
+            if (!text && !image && !compact) return null
+            const col = ANS_COLORS[letter]
+            const isCorrect = showCorrect && slide.correct_answer === letter
+            return (
+              <div key={letter} style={{
+                display: 'flex', alignItems: 'center',
+                gap: compact ? 5 : Math.max(6, 10*scale),
+                background: isCorrect ? col.bg : dark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.04)',
+                border: `${compact ? 1 : 1.5}px solid ${isCorrect ? col.border : dark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)'}`,
+                borderRadius: 6,
+                padding: compact ? '3px 6px' : `${Math.max(6, 10*scale)}px ${Math.max(8, 14*scale)}px`,
+                transition: 'all .2s',
+              }}>
+                {/* Letter badge */}
+                <div style={{
+                  width: compact ? 18 : Math.max(22, 28*scale),
+                  height: compact ? 18 : Math.max(22, 28*scale),
+                  borderRadius: 4,
+                  background: isCorrect ? col.border : 'transparent',
+                  border: `2px solid ${col.border}`,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  flexShrink: 0,
+                  fontSize: compact ? 9 : Math.max(11, 13*scale),
+                  fontWeight: 800,
+                  color: isCorrect ? '#fff' : col.label,
+                  fontFamily: "'DM Mono', monospace",
+                }}>{letter}</div>
+
+                {/* Answer image (optional) */}
+                {image && (
+                  <img src={image} alt="" style={{
+                    flex: 1, minHeight: 0, maxWidth: '100%',
+                    objectFit: 'contain', borderRadius: 4,
+                  }}/>
+                )}
+
+                {/* Answer text (una sola vez) */}
+                <span style={{
+                  color: text ? textColor : mutedColor,
+                  fontSize: aFontSize,
+                  fontStyle: text ? 'normal' : 'italic',
+                  fontWeight: isCorrect ? 600 : 400,
+                  lineHeight: 1.3,
+                }}>
+                  {text || (image ? '' : (compact ? '' : `Answer ${letter}`))}
+                </span>
+
+                {/* Live percentage */}
+                {tally && (
+                  <div style={{
+                    marginLeft: 'auto', flexShrink: 0,
+                    fontFamily: "'JetBrains Mono', monospace",
+                    fontSize: compact ? 10 : Math.max(12, 15*scale),
+                    fontWeight: 700, color: col.border,
+                    minWidth: compact ? 34 : 52, textAlign: 'right',
+                  }}>
+                    {totalStudents ? Math.round((tally[letter] || 0) / totalStudents * 100) : 0}%
+                    <span style={{
+                      fontSize: compact ? 8 : Math.max(9, 11*scale),
+                      color: mutedColor, marginLeft: 3, fontWeight: 400,
+                    }}> ({tally[letter] || 0})</span>
+                  </div>
+                )}
+
+                {/* Correct checkmark */}
+                {isCorrect && !compact && (
+                  <span style={{ marginLeft: tally ? 6 : 'auto', color: col.border, fontSize: 16, fontWeight: 800 }}>✓</span>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      )}
+      </>)}
 {/* Answer grid (2x2) — imagen arriba, texto abajo */}
       {hasAnswers && gridLayout && (
         <div style={{
