@@ -50,6 +50,35 @@ function ScanCodeModal({ scanCode, connected = false, onClose }) {
   )
 }
 
+// ── Lista de alumnos en pantalla completa ────────────────
+// Mide el nombre más largo (con la fuente real) y elige entre 1, 2 o 3 columnas
+// la opción que permite la letra más grande. Antes eran siempre 2 columnas con
+// la letra calculada solo por la altura, y los nombres se cortaban con "…".
+let measureCtx = null
+function textWidth(text, px) {
+  measureCtx = measureCtx || document.createElement('canvas').getContext('2d')
+  measureCtx.font = `${px}px Syne, sans-serif`
+  return measureCtx.measureText(text).width
+}
+function rosterLayout(students, rosterW, viewportH) {
+  const n = Math.max(1, students.length)
+  const GAP = 4, PAD_X = 24, CELL_PAD = 12 + 2 + 6   // padding de la columna, de la celda, borde y separación
+  // Ancho (a 100px) del nombre más largo y del número de tarjeta (0.75em, monoespaciado)
+  const nameW = Math.max(1, ...students.map(st => textWidth(shortName(st.name), 100))) / 100
+  const cardW = (String(Math.max(0, ...students.map(st => st.card_id || 0))).length + 1) * 0.6 * 0.75
+  const availH = viewportH - 28 - 40 - 8                // padding, título y separación
+  let best = { cols: 1, font: 0 }
+  for (const cols of [1, 2, 3]) {
+    const colW = (rosterW - PAD_X - GAP * (cols - 1)) / cols
+    const byWidth = (colW - CELL_PAD) / (nameW + cardW) * 0.95
+    const rows = Math.ceil(n / cols)
+    const byHeight = ((availH - GAP * (rows - 1)) / rows) * 0.55
+    const font = Math.min(24, byWidth, byHeight)
+    if (font > best.font + 0.5) best = { cols, font }
+  }
+  return { cols: best.cols, font: Math.max(11, best.font) }
+}
+
 export default function SessionPage() {
   const { id: sessionId } = useParams()
   const navigate = useNavigate()
@@ -77,12 +106,14 @@ export default function SessionPage() {
   const [present, setPresent] = useState(false)
   const [viewport, setViewport] = useState({ w: window.innerWidth, h: window.innerHeight })
   const [controlsVisible, setControlsVisible] = useState(true)
-  // Lista de alumnos al costado en pantalla completa (se recuerda en este computador)
+  // Lista de alumnos al costado en pantalla completa (se recuerda en este computador).
+  // Visible por defecto. Clave v2: antes partía oculta y quedó guardada como
+  // oculta en todos los computadores; con la clave nueva vuelve a aparecer.
   const [showRoster, setShowRoster] = useState(() => {
-    try { return localStorage.getItem('present.roster') === '1' } catch { return false }
+    try { return localStorage.getItem('present.roster.v2') !== '0' } catch { return true }
   })
   useEffect(() => {
-    try { localStorage.setItem('present.roster', showRoster ? '1' : '0') } catch { /* sin storage */ }
+    try { localStorage.setItem('present.roster.v2', showRoster ? '1' : '0') } catch { /* sin storage */ }
   }, [showRoster])
   const hideTimerRef = useRef(null)
 
@@ -141,6 +172,8 @@ export default function SessionPage() {
   // un useEffect que corría al montar, mientras se mostraba "Cargando…" y el
   // contenedor no existía; nunca se medía y la slide quedaba fija en 720 px,
   // dejando un espacio en blanco a la derecha.
+  // Se mide ancho y alto del espacio disponible: la slide (16:9) usa lo más
+  // grande que quepa en ambos, así se ve completa sin hacer scroll.
   const [stageWidth, setStageWidth] = useState(720)
   const stageObserver = useRef(null)
   const stageRef = useCallback(el => {
@@ -148,7 +181,10 @@ export default function SessionPage() {
     stageObserver.current = null
     if (!el) return
     const ro = new ResizeObserver(entries => {
-      for (const entry of entries) setStageWidth(Math.round(entry.contentRect.width))
+      for (const entry of entries) {
+        const { width, height } = entry.contentRect
+        setStageWidth(Math.max(200, Math.round(Math.min(width, height * 16 / 9))))
+      }
     })
     ro.observe(el)
     stageObserver.current = ro
@@ -409,15 +445,14 @@ useEffect(() => {
       {present && currentSlide && (() => {
         // Con la lista de alumnos, esta ocupa una columna a la derecha y la slide
         // usa el resto. La slide siempre es 16:9, lo más grande posible.
-        const rosterW = showRoster ? Math.round(Math.min(420, Math.max(260, viewport.w * 0.2))) : 0
+        const rosterW = showRoster ? Math.round(Math.min(480, Math.max(280, viewport.w * 0.24))) : 0
         const fw = Math.min(viewport.w - rosterW, Math.round(viewport.h * 16 / 9))
         const fh = Math.round(fw * 9 / 16)
         const answeredIds = new Set(responses.filter(r => r.slide_id === currentSlide.id).map(r => r.student_id))
         const answeredHere = answeredIds.size
-        // Tamaño de letra de la lista según cuántas filas deben caber en la altura
-        const rows = Math.max(1, Math.ceil(sortedStudents.length / 2))
-        const rowH = (viewport.h - 70) / rows
-        const rosterFont = Math.max(11, Math.min(20, rowH * 0.42))
+        // Columnas y tamaño de letra de la lista: lo más grande posible sin que
+        // ningún nombre se corte y sin que la lista necesite scroll.
+        const { cols: rosterCols, font: rosterFont } = rosterLayout(sortedStudents, rosterW, viewport.h)
         return (
           <div onMouseMove={pokeControls} onClick={pokeControls}
             style={{ position:'fixed', inset:0, zIndex:1000, background:'#000',
@@ -445,7 +480,7 @@ useEffect(() => {
                   <span style={{ color:'#777' }}> / {totalStudents}</span>
                 </div>
                 <div style={{ flex:1, minHeight:0, overflow:'hidden', display:'grid',
-                  gridTemplateColumns:'repeat(2, minmax(0, 1fr))', gridAutoRows:'1fr', gap:4 }}>
+                  gridTemplateColumns:`repeat(${rosterCols}, minmax(0, 1fr))`, gridAutoRows:'1fr', gap:4 }}>
                   {sortedStudents.map(st => {
                     const done = answeredIds.has(st.id)
                     return (
@@ -458,7 +493,7 @@ useEffect(() => {
                         <span style={{ fontFamily:'var(--mono)', fontSize:'.75em', color: done ? '#2ed573' : '#777', flexShrink:0 }}>
                           #{st.card_id}
                         </span>
-                        <span style={{ overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                        <span style={{ overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }} title={st.name}>
                           {shortName(st.name)}
                         </span>
                       </div>
@@ -501,45 +536,46 @@ useEffect(() => {
         {/* Left: slide + controls + optional results */}
         <div style={{ display:'flex', flexDirection:'column', gap:'.75rem', minWidth:0 }}>
 
-          {/* Slim toolbar above the slide — keeps the canvas itself free of overlays */}
-          <div style={{ display:'flex', justifyContent:'flex-end' }}>
-            <button
-              className="btn btn-ghost btn-sm"
-              onClick={() => setShowStats(v => !v)}
-            >
-              {showStats ? 'Ocultar %' : 'Mostrar %'}
-            </button>
-            <button className="btn btn-primary btn-sm" onClick={enterPresent}
-              title="Mostrar la pregunta en pantalla completa (para el televisor)" style={{ marginLeft:'.5rem' }}>
-              <Maximize size={13}/> Pantalla completa
-            </button>
-          </div>
+          {/* Slide + controles: ocupan exactamente el alto de la pantalla, así la
+              pregunta se ve completa sin scroll. Los botones van debajo. */}
+          <div style={{ height:'calc(100vh - 57px - 3rem)', minHeight:320, display:'flex', flexDirection:'column', gap:'.75rem' }}>
+            <div ref={stageRef} style={{ flex:1, minHeight:0, width:'100%', display:'flex', alignItems:'flex-start', justifyContent:'center' }}>
+              <div style={{ border:'1px solid var(--border)', borderRadius:'var(--radius)', overflow:'hidden', lineHeight:0 }}>
+                <SlideRenderer
+                  slide={currentSlide}
+                  width={stageWidth}
+                  height={stageHeight}
+                  showCorrect={revealCorrect}
+                  tally={showStats ? tally : null}
+                  totalStudents={totalStudents}
+                />
+              </div>
+            </div>
 
-          <div
-            ref={stageRef}
-            style={{ border:'1px solid var(--border)', borderRadius:'var(--radius)', overflow:'hidden', width:'100%' }}
-          >
-            <SlideRenderer
-              slide={currentSlide}
-              width={stageWidth}
-              height={stageHeight}
-              showCorrect={revealCorrect}
-              tally={showStats ? tally : null}
-              totalStudents={totalStudents}
-            />
-          </div>
-
-          {/* Navigation */}
-          <div style={{ display:'flex', alignItems:'center', gap:'1rem', justifyContent:'center' }}>
-            <button className="btn btn-ghost" onClick={() => goTo(currentIdx - 1)} disabled={currentIdx === 0}>
-              <ChevronLeft size={16}/>
-            </button>
-            <span style={{ fontFamily:'var(--mono)', fontSize:'.85rem', color:'var(--muted)' }}>
-              Slide {currentIdx + 1} / {slides.length}
-            </span>
-            <button className="btn btn-ghost" onClick={() => goTo(currentIdx + 1)} disabled={currentIdx === slides.length - 1}>
-              <ChevronRight size={16}/>
-            </button>
+            {/* Navegación y botones, debajo de la slide */}
+            <div style={{ display:'flex', alignItems:'center', gap:'1rem', flexShrink:0 }}>
+              <div style={{ flex:1 }}/>
+              <div style={{ display:'flex', alignItems:'center', gap:'1rem' }}>
+                <button className="btn btn-ghost" onClick={() => goTo(currentIdx - 1)} disabled={currentIdx === 0}>
+                  <ChevronLeft size={16}/>
+                </button>
+                <span style={{ fontFamily:'var(--mono)', fontSize:'.85rem', color:'var(--muted)' }}>
+                  Slide {currentIdx + 1} / {slides.length}
+                </span>
+                <button className="btn btn-ghost" onClick={() => goTo(currentIdx + 1)} disabled={currentIdx === slides.length - 1}>
+                  <ChevronRight size={16}/>
+                </button>
+              </div>
+              <div style={{ flex:1, display:'flex', justifyContent:'flex-end', gap:'.5rem' }}>
+                <button className="btn btn-ghost btn-sm" onClick={() => setShowStats(v => !v)}>
+                  {showStats ? 'Ocultar %' : 'Mostrar %'}
+                </button>
+                <button className="btn btn-primary btn-sm" onClick={enterPresent}
+                  title="Mostrar la pregunta en pantalla completa (para el televisor)">
+                  <Maximize size={13}/> Pantalla completa
+                </button>
+              </div>
+            </div>
           </div>
 
           {/* Results — hidden by default, professor decides when to reveal.
