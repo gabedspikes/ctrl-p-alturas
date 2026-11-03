@@ -12,11 +12,19 @@ const ANS_COLORS = {
 
 // Caja de una alternativa: borde y relleno del color de su letra.
 // La correcta (al revelar) se distingue con relleno más fuerte y borde más grueso.
+// Grosor del borde de las cajas. El cuadrado de la letra usa el mismo grosor,
+// para que los dos bordes calcen.
+function boxBorderW(compact, scale) {
+  return compact ? 1 : Math.max(2, 2.5 * scale)
+}
 function answerBox(col, isCorrect, compact, scale) {
-  const w = compact ? 1 : Math.max(2, 2.5 * scale)
+  const w = boxBorderW(compact, scale)
   return {
     background: isCorrect ? col.strong : col.bg,
-    border: `${isCorrect ? w * 2 : w}px solid ${col.border}`,
+    border: `${w}px solid ${col.border}`,
+    // El grosor extra de la correcta va hacia afuera (sombra), así su contenido
+    // queda alineado con el de las demás cajas en vez de correrse hacia adentro.
+    boxShadow: isCorrect ? `0 0 0 ${w}px ${col.border}` : 'none',
   }
 }
 
@@ -178,7 +186,7 @@ export default function SlideRenderer({
                   height: compact ? 18 : Math.max(22, 28*scale),
                   borderRadius: 4,
                   background: isCorrect ? col.border : 'transparent',
-                  border: `2px solid ${col.border}`,
+                  border: `${boxBorderW(compact, scale)}px solid ${col.border}`,
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
                   flexShrink: 0,
                   fontSize: compact ? 9 : Math.max(11, 13*scale),
@@ -289,7 +297,7 @@ export default function SlideRenderer({
                   height: compact ? 18 : Math.max(22, 28*scale),
                   borderRadius: 4,
                   background: isCorrect ? col.border : 'transparent',
-                  border: `2px solid ${col.border}`,
+                  border: `${boxBorderW(compact, scale)}px solid ${col.border}`,
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
                   flexShrink: 0,
                   fontSize: compact ? 9 : Math.max(11, 13*scale),
@@ -382,7 +390,7 @@ export default function SlideRenderer({
                     height: compact ? 16 : Math.max(20, 24*scale),
                     borderRadius: 4,
                     background: isCorrect ? col.border : 'transparent',
-                    border: `2px solid ${col.border}`,
+                    border: `${boxBorderW(compact, scale)}px solid ${col.border}`,
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
                     flexShrink: 0,
                     fontSize: compact ? 9 : Math.max(10, 12*scale),

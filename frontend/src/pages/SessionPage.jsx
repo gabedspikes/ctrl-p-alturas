@@ -455,7 +455,7 @@ useEffect(() => {
         const { cols: rosterCols, font: rosterFont } = rosterLayout(sortedStudents, rosterW, viewport.h)
         return (
           <div onMouseMove={pokeControls} onClick={pokeControls}
-            style={{ position:'fixed', inset:0, zIndex:1000, background:'#000',
+            style={{ position:'fixed', inset:0, zIndex:1000, background:'var(--bg)',
               display:'flex', alignItems:'center', justifyContent:'center',
               cursor: controlsVisible ? 'default' : 'none' }}>
             <div style={{ flex:1, minWidth:0, height:'100%', display:'flex', alignItems:'center', justifyContent:'center' }}>
@@ -472,12 +472,13 @@ useEffect(() => {
             {showRoster && (
               <div style={{
                 width: rosterW, flexShrink:0, height:'100%', boxSizing:'border-box',
-                background:'#141417', borderLeft:'1px solid #2a2a30',
-                padding:'14px 12px', display:'flex', flexDirection:'column', gap:8, color:'#e8e8ec',
+                // Colores del tema (modo claro u oscuro), igual que el resto de la página
+                background:'var(--surface)', borderLeft:'1px solid var(--border)',
+                padding:'14px 12px', display:'flex', flexDirection:'column', gap:8, color:'var(--text)',
               }}>
                 <div style={{ fontSize: rosterFont, fontWeight:800, letterSpacing:'.04em' }}>
-                  Respondieron <span style={{ color:'#2ed573' }}>{answeredHere}</span>
-                  <span style={{ color:'#777' }}> / {totalStudents}</span>
+                  Respondieron <span style={{ color:'var(--success)' }}>{answeredHere}</span>
+                  <span style={{ color:'var(--muted)' }}> / {totalStudents}</span>
                 </div>
                 <div style={{ flex:1, minHeight:0, overflow:'hidden', display:'grid',
                   gridTemplateColumns:`repeat(${rosterCols}, minmax(0, 1fr))`, gridAutoRows:'1fr', gap:4 }}>
@@ -487,10 +488,10 @@ useEffect(() => {
                       <div key={st.id} style={{
                         display:'flex', alignItems:'center', gap:6, minWidth:0, padding:'0 6px',
                         borderRadius:6, fontSize: rosterFont,
-                        border:`1px solid ${done ? '#2ed573' : '#2a2a30'}`,
-                        background: done ? 'rgba(46,213,115,.18)' : 'rgba(255,255,255,.03)',
+                        border:`1px solid ${done ? 'var(--success)' : 'var(--border)'}`,
+                        background: done ? 'rgba(46,213,115,.18)' : 'var(--bg)',
                       }}>
-                        <span style={{ fontFamily:'var(--mono)', fontSize:'.75em', color: done ? '#2ed573' : '#777', flexShrink:0 }}>
+                        <span style={{ fontFamily:'var(--mono)', fontSize:'.75em', color: done ? 'var(--success)' : 'var(--muted)', flexShrink:0 }}>
                           #{st.card_id}
                         </span>
                         <span style={{ overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }} title={st.name}>
@@ -506,8 +507,9 @@ useEffect(() => {
               // centrada sobre la slide (no sobre la lista de alumnos)
               position:'fixed', bottom:20, left:(viewport.w - rosterW) / 2, transform:'translateX(-50%)',
               display:'flex', alignItems:'center', gap:'.6rem', padding:'.5rem .75rem',
-              background:'rgba(20,20,23,.88)', border:'1px solid rgba(255,255,255,.12)', borderRadius:10,
-              color:'#e8e8ec', fontSize:'.85rem',
+              background:'var(--surface)', border:'1px solid var(--border)', borderRadius:10,
+              boxShadow:'0 4px 18px rgba(0,0,0,.18)',
+              color:'var(--text)', fontSize:'.85rem',
               opacity: controlsVisible ? 1 : 0, transition:'opacity .3s',
               pointerEvents: controlsVisible ? 'auto' : 'none',
             }}>
@@ -516,7 +518,7 @@ useEffect(() => {
               <span style={{ fontFamily:'var(--mono)' }}>{currentIdx + 1} / {slides.length}</span>
               <button className="btn btn-ghost btn-sm" onClick={() => goTo(currentIdx + 1)} disabled={currentIdx === slides.length - 1}
                 title="Siguiente (→)"><ChevronRight size={16}/></button>
-              <span style={{ color:'#888', margin:'0 .25rem' }}>·</span>
+              <span style={{ color:'var(--muted)', margin:'0 .25rem' }}>·</span>
               <span title="Alumnos que ya respondieron esta pregunta">{answeredHere}/{totalStudents} respondieron</span>
               <button className="btn btn-ghost btn-sm" onClick={() => setShowStats(v => !v)} title="Mostrar u ocultar porcentajes (P)">
                 {showStats ? 'Ocultar %' : 'Mostrar %'}
