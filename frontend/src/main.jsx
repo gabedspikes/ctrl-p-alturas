@@ -14,6 +14,7 @@ import CardGeneratorPage from './pages/CardGeneratorPage'
 import './styles.css'
 import InstallPrompt from './components/InstallPrompt'
 import ScanEntryPage from './pages/ScanEntryPage'
+import CameraSetupPage from './pages/CameraSetupPage'
 import ErrorBoundary from './components/ErrorBoundary'
 import { installGlobalErrorHandlers } from './lib/errorLog'
 import { Sun, Moon } from 'lucide-react'
@@ -104,6 +105,7 @@ function AppRoutes() {
         <Routes>
           <Route path="/auth" element={<AuthGate />} />
           <Route path="/scan" element={<Protected><ScanEntryPage /></Protected>} />
+          <Route path="/scan/camara" element={<Protected><CameraSetupPage /></Protected>} />
           <Route path="/scan/:sessionId" element={<Protected><ScanPage /></Protected>} />
           <Route path="*" element={<Navigate to="/scan" replace />} />
         </Routes>
@@ -111,6 +113,7 @@ function AppRoutes() {
         <Routes>
           <Route path="/auth" element={<AuthGate />} />
           <Route path="/scan" element={<Protected><Layout><ScanEntryPage /></Layout></Protected>} />
+          <Route path="/scan/camara" element={<Protected><CameraSetupPage /></Protected>} />
           <Route path="/scan/:sessionId" element={<Protected><ScanPage /></Protected>} />
           <Route path="/" element={<Protected><Layout><CoursesPage /></Layout></Protected>} />
           <Route path="/presentations" element={<Protected><Layout><PresentationsPage /></Layout></Protected>} />

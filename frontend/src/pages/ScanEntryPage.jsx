@@ -65,6 +65,21 @@ export default function ScanEntryPage() {
           {loading ? 'Buscando…' : 'Abrir escáner'}
         </button>
       </form>
+
+      {/* Calibrar y probar la cámara antes de la clase, sin necesitar una sesión */}
+      <div style={{ marginTop: '2rem', paddingTop: '1.25rem', borderTop: '1px solid var(--border)' }}>
+        <button
+          type="button"
+          className="btn btn-ghost"
+          onClick={() => navigate('/scan/camara')}
+          style={{ width: '100%', fontSize: '.95rem', padding: '.7rem' }}
+        >
+          📷 Configurar cámara
+        </button>
+        <p style={{ color: 'var(--muted)', fontSize: '.78rem', marginTop: '.5rem' }}>
+          Calibra la cámara y prueba la lectura de tarjetas sin iniciar una sesión.
+        </p>
+      </div>
     </div>
   )
 }
