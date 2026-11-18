@@ -4,6 +4,7 @@ import { useAuth } from '../lib/auth'
 import { supabase } from '../lib/supabase'
 import { logError, friendlyError } from '../lib/errorLog'
 import { useSchoolYear } from '../lib/schoolYear'
+import { resumeSessionRow } from '../lib/sessions'
 import { FileSliders, Plus, Pencil, Trash2, Play, AlertCircle } from 'lucide-react'
 
 
@@ -192,16 +193,28 @@ function StartSessionModal({ presentation, onClose }) {
       const [{ data: slides, error: e1 }, { data: open, error: e2 }] = await Promise.all([
         supabase.from('slides').select('id, slide_order, correct_answer')
           .eq('presentation_id', presentation.id).order('slide_order'),
-        supabase.from('sessions').select('id')
-          .eq('presentation_id', presentation.id).eq('status', 'active').limit(1),
+        supabase.from('sessions').select('id, status, current_slide_id, created_at')
+          .eq('presentation_id', presentation.id).in('status', ['active', 'paused'])
+          .order('created_at', { ascending: false }).limit(1),
       ])
       if (e1 || e2) throw (e1 || e2)
 
       if (!slides?.length) { setErr('Este test no tiene diapositivas. Agrégalas en "Editar Diapositivas".'); return }
 
       if (open?.length) {
-        if (confirm('Ya hay una sesión de este test abierta (quizá quedó sin finalizar). ¿Retomarla en vez de crear otra?')) {
-          navigate(`/sessions/${open[0].id}`); return
+        const prev = open[0]
+        if (prev.status === 'paused') {
+          // Sesión pausada antes de la última slide: retomarla sigue donde quedó
+          const n = slides.findIndex(s => s.id === prev.current_slide_id) + 1
+          const fecha = new Date(prev.created_at).toLocaleDateString('es-CL')
+          if (confirm(`Este test tiene una sesión pausada (iniciada el ${fecha}${n ? `, quedó en la slide ${n} de ${slides.length}` : ''}).\n\n` +
+                      '¿Retomarla? Si eliges Cancelar se creará una sesión nueva y la pausada seguirá esperando.')) {
+            const { error } = await resumeSessionRow(prev.id)
+            if (error) throw error
+            navigate(`/sessions/${prev.id}`); return
+          }
+        } else if (confirm('Ya hay una sesión de este test abierta (quizá quedó sin finalizar). ¿Retomarla en vez de crear otra?')) {
+          navigate(`/sessions/${prev.id}`); return
         }
       }
 
@@ -286,6 +299,7 @@ export default function PresentationsPage() {
   const [presentations, setPresentations] = useState([])
   const [modal, setModal]               = useState(null)
   const [sessionModal, setSessionModal] = useState(null)
+  const [paused, setPaused]             = useState(new Set())   // ids de tests con una sesión pausada
   const navigate = useNavigate()
 
   useEffect(() => { load() }, [])
@@ -297,6 +311,11 @@ export default function PresentationsPage() {
       .order('created_at', { ascending: false })
     if (error) { logError('presentations.load', error); alert(friendlyError(error, 'No se pudieron cargar los tests.')) }
     setPresentations(data || [])
+    // Tests con una sesión pausada (para marcarlos y que no queden olvidados sin archivar)
+    const { data: ps, error: pErr } = await supabase
+      .from('sessions').select('presentation_id').eq('status', 'paused')
+    if (pErr) logError('presentations.paused', pErr)
+    setPaused(new Set((ps || []).map(r => r.presentation_id)))
   }
 
 async function deletePresentation(id) {
@@ -315,7 +334,8 @@ async function deletePresentation(id) {
   const finished     = (sessions || []).filter(s => s.status === 'finished')
   // Terminadas pero todavía NO copiadas a Plickers: son las que se perderían.
   const sinArchivar  = finished.filter(s => !s.archived_at)
-  const activas       = (sessions || []).filter(s => s.status === 'active')
+  // Pausadas también cuentan como sin terminar: no se archivan hasta finalizarlas
+  const activas       = (sessions || []).filter(s => s.status === 'active' || s.status === 'paused')
 
   // 2. Armar el mensaje de confirmación según el caso.
   let mensaje
@@ -329,7 +349,7 @@ async function deletePresentation(id) {
     mensaje =
       '⚠ ATENCIÓN — Este slides tiene datos que NO se han guardado en el histórico.\n\n' +
       `Sesiones terminadas sin archivar: ${sinArchivar.length}\n` +
-      (activas.length > 0 ? `Sesiones aún activas (sin terminar): ${activas.length}\n` : '') +
+      (activas.length > 0 ? `Sesiones activas o pausadas (sin terminar): ${activas.length}\n` : '') +
       '\nSi eliminas el slides ahora, se perderán de forma permanente las respuestas ' +
       'de los alumnos de esas sesiones, porque todavía no fueron copiadas a Plickers.\n\n' +
       'Recomendación: espera a que el archivado automático se ejecute (corre en las ' +
@@ -339,7 +359,7 @@ async function deletePresentation(id) {
   } else if (activas.length > 0) {
     // Hay sesiones activas (colgadas): no se pueden archivar hasta terminarlas.
     mensaje =
-      '⚠ Este slides tiene ' + activas.length + ' sesión(es) todavía activa(s) (sin terminar).\n\n' +
+      '⚠ Este slides tiene ' + activas.length + ' sesión(es) activa(s) o pausada(s) (sin terminar).\n\n' +
       'Una sesión sin terminar no se archiva, así que sus datos se perderían al borrar.\n' +
       'Si esa sesión quedó abierta por error, conviene finalizarla primero desde el ' +
       'historial de sesiones, dejar que se archive, y luego borrar el slides.\n\n' +
@@ -407,6 +427,10 @@ async function deletePresentation(id) {
                   <div style={{ display:'flex', gap:'.35rem', marginTop:'.5rem', flexWrap:'wrap' }}>
                     <span className="badge badge-blue">{p.courses?.name || 'No class'}</span>
                     {p.subjects?.name && <span className="badge badge-accent">{p.subjects.name}</span>}
+                    {paused.has(p.id) && (
+                      <span className="badge" title="Tiene una sesión pausada: no se archiva hasta retomarla y finalizarla"
+                        style={{ background:'rgba(255,165,0,.15)', color:'#ffa500' }}>⏸ Sesión pausada</span>
+                    )}
                   </div>
                 </div>
                 <button className="btn btn-ghost btn-sm" onClick={() => setModal(p)}>Editar</button>
@@ -417,7 +441,7 @@ async function deletePresentation(id) {
                   <Pencil size={12}/> Editar Diapositivas
                 </button>
                 <button className="btn btn-primary btn-sm" onClick={() => setSessionModal(p)}>
-                  <Play size={12}/> Ejecutar
+                  <Play size={12}/> {paused.has(p.id) ? 'Retomar' : 'Ejecutar'}
                 </button>
                 <button className="btn btn-danger btn-sm" onClick={() => deletePresentation(p.id)}>
                   <Trash2 size={12}/>

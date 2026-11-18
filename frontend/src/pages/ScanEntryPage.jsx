@@ -26,7 +26,7 @@ export default function ScanEntryPage() {
 
     setLoad(false)
     if (qErr) { logError('scanEntry', qErr); setError(friendlyError(qErr, 'Error de conexión. Intenta de nuevo.')); return }
-    if (!data?.id) { setError('Código no válido o sesión finalizada.'); return }
+    if (!data?.id) { setError('Código no válido, o la sesión está pausada o finalizada. Revisa el código en el computador.'); return }
     navigate(`/scan/${data.id}`)
   }
 

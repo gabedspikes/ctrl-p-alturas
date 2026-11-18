@@ -7,6 +7,7 @@ import { useOnline } from '../lib/useOnline'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
 import SlideRenderer from '../components/SlideRenderer'
 import { shortName } from '../lib/names'
+import { finishSessionRow, pauseSessionRow } from '../lib/sessions'
 import {
   loadCalibration, saveCalibration, frameTransform, drawFrame, videoCss,
   newCalibrationRun, addCalibrationFrame, DEFAULT_CALIBRATION,
@@ -50,6 +51,8 @@ export default function ScanPage() {
   const [camReady, setCamReady]     = useState(false)
   const [currentSlideId, setCurrentSlideId] = useState(slideId)
   const [sessionEnded, setSessionEnded] = useState(false)
+  const [endedPaused, setEndedPaused]   = useState(false)   // terminó porque se pausó (no finalizó)
+  const [finishAsk, setFinishAsk]       = useState(false)   // hoja Pausar / Finalizar
   const [slides, setSlides] = useState([])   // ordered list, for Prev/Next controls
   const [showList, setShowList] = useState(false)   // lista de alumnos oculta por defecto
   const [videoAspect, setVideoAspect] = useState(4/3)
@@ -109,7 +112,7 @@ useEffect(() => {
         setStatus('error'); return
       }
       setSessionInfo(sess)
-      if (sess.status !== 'active') { setSessionEnded(true); setStatus('ready'); return }
+      if (sess.status !== 'active') { setEndedPaused(sess.status === 'paused'); setSessionEnded(true); setStatus('ready'); return }
 
       // Ordered slide list so Prev/Next can be controlled from the phone too
       const { data: slideList } = await supabase
@@ -209,14 +212,20 @@ useEffect(() => {
   }
   applySlideChange(newSlideId)
 }
-async function finishSession() {
+// Si todavía no se llega a la última slide se ofrece pausar (para retomar
+// otro día, sin archivar) además de finalizar.
+function finishSession() {
+  const idx = slides.findIndex(s => s.id === currentSlideIdRef.current)
+  if (slides.length > 1 && idx >= 0 && idx < slides.length - 1) { setFinishAsk(true); return }
   if (!confirm('¿Finalizar la sesión para todos? Esto cierra la presentación.')) return
-  const { error } = await supabase.from('sessions')
-    .update({ status: 'finished', finished_at: new Date().toISOString() })
-    .eq('id', sessionId)
+  endSession(false)
+}
+async function endSession(pause) {
+  setFinishAsk(false)
+  const { error } = pause ? await pauseSessionRow(sessionId) : await finishSessionRow(sessionId)
   if (error) {
-    logError('scan.finishSession', error)
-    alert(friendlyError(error, 'No se pudo finalizar la sesión. Intenta de nuevo.'))
+    logError(pause ? 'scan.pauseSession' : 'scan.finishSession', error)
+    alert(friendlyError(error, pause ? 'No se pudo pausar la sesión. Intenta de nuevo.' : 'No se pudo finalizar la sesión. Intenta de nuevo.'))
   }
 }
   // ── Realtime: follow slide changes from laptop (or from this phone) ──
@@ -231,7 +240,9 @@ async function finishSession() {
       if (rafRef.current) cancelAnimationFrame(rafRef.current)
     }
     function applyRow(row) {
-      if (row.status === 'finished') { stopCamera(); setSessionEnded(true); return }
+      if (row.status === 'finished' || row.status === 'paused') {
+        stopCamera(); setEndedPaused(row.status === 'paused'); setSessionEnded(true); return
+      }
       if (row.current_slide_id && row.current_slide_id !== currentSlideIdRef.current) {
         applySlideChange(row.current_slide_id)
       }
@@ -553,11 +564,15 @@ if (student && cooled && !alreadyScanned && slideReadyRef.current) {
   )
   if (sessionEnded) return (
     <div style={styles.loadingScreen}>
-      <div style={{ fontSize: '2.5rem', marginBottom: '1rem' }}>✓</div>
-      <h2 style={{ color: '#2ed573', marginBottom: '.5rem' }}>Sesión finalizada</h2>
+      <div style={{ fontSize: '2.5rem', marginBottom: '1rem' }}>{endedPaused ? '⏸' : '✓'}</div>
+      <h2 style={{ color: endedPaused ? '#ffa500' : '#2ed573', marginBottom: '.5rem' }}>
+        {endedPaused ? 'Sesión pausada' : 'Sesión finalizada'}
+      </h2>
       <p style={{ color: '#888', fontSize: '.9rem', textAlign: 'center', maxWidth: 280 }}>
-        El profesor cerró la sesión. Los resultados se muestran en el computador.
-        Ya puedes cerrar esta pestaña.
+        {endedPaused
+          ? 'La sesión quedó pausada para retomarla otro día. Al retomarla, ingresa el código que muestre el computador.'
+          : 'El profesor cerró la sesión. Los resultados se muestran en el computador.'}
+        {' '}Ya puedes cerrar esta pestaña.
       </p>
     </div>
   )
@@ -585,6 +600,21 @@ if (student && cooled && !alreadyScanned && slideReadyRef.current) {
         <button style={styles.calibBtn} onClick={openCalibration} title="Calibrar cámara">📷</button>
         <button style={styles.finishBtn} onClick={finishSession}>Finalizar</button>
       </div>
+
+      {finishAsk && (
+        <div style={styles.calibSheet}>
+          <div style={{ fontWeight: 800, marginBottom: '.4rem' }}>Faltan slides</div>
+          <p style={styles.calibText}>
+            Todavía no llegan a la última slide. <b>Pausar</b> la deja guardada para retomarla otro día
+            (no se archiva hasta finalizarla). <b>Finalizar</b> la cierra con las respuestas que tiene.
+          </p>
+          <div style={{ ...styles.calibBtns, flexWrap: 'wrap' }}>
+            <button style={styles.calibGhost} onClick={() => setFinishAsk(false)}>Cancelar</button>
+            <button style={{ ...styles.calibGhost, borderColor: '#ff4757', color: '#ff4757' }} onClick={() => endSession(false)}>Finalizar igual</button>
+            <button style={styles.calibPrimary} onClick={() => endSession(true)}>⏸ Pausar</button>
+          </div>
+        </div>
+      )}
 
       {(!online || rtDown || saveFailing) && (
         <div style={styles.warnBar}>

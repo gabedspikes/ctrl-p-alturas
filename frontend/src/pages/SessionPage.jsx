@@ -6,6 +6,7 @@ import { useOnline } from '../lib/useOnline'
 import { ChevronLeft, ChevronRight, Smartphone, Maximize, X } from 'lucide-react'
 import SlideRenderer from '../components/SlideRenderer'
 import { shortName } from '../lib/names'
+import { finishSessionRow, pauseSessionRow, resumeSessionRow } from '../lib/sessions'
 
 import QRCode from 'qrcode'
 
@@ -106,6 +107,8 @@ export default function SessionPage() {
   const [present, setPresent] = useState(false)
   const [viewport, setViewport] = useState({ w: window.innerWidth, h: window.innerHeight })
   const [controlsVisible, setControlsVisible] = useState(true)
+  const [finishAsk, setFinishAsk] = useState(false)   // diálogo Pausar / Finalizar
+  const [busy, setBusy] = useState(false)
   // Lista de alumnos al costado en pantalla completa (se recuerda en este computador).
   // Visible por defecto. Clave v2: antes partía oculta y quedó guardada como
   // oculta en todos los computadores; con la clave nueva vuelve a aparecer.
@@ -314,9 +317,9 @@ useEffect(() => {
         event: 'UPDATE', schema: 'public', table: 'sessions',
         filter: `id=eq.${sessionId}`
       }, payload => {
-        // Finalización desde el teléfono → reflejar el estado aquí también
-        if (payload.new.status === 'finished') {
-          setSession(prev => prev ? { ...prev, status: 'finished', finished_at: payload.new.finished_at } : prev)
+        // Finalizada, pausada o retomada desde el teléfono → reflejarlo aquí también
+        if (payload.new.status) {
+          setSession(prev => prev ? { ...prev, status: payload.new.status, finished_at: payload.new.finished_at } : prev)
         }
         const newSlideId = payload.new.current_slide_id
         if (newSlideId) {
@@ -357,17 +360,52 @@ useEffect(() => {
     }
   }
 
-  async function finishSession() {
+  // Si todavía no se llega a la última slide, se ofrece pausar (para retomar
+  // otro día) en vez de finalizar. Una sesión pausada no se archiva.
+  function finishSession() {
+    if (currentIdx < slides.length - 1) { setFinishAsk(true); return }
     if (!confirm('¿Finalizar la sesión? Podrás revelar los resultados después.')) return
-    const { error } = await supabase.from('sessions')
-      .update({ status: 'finished', finished_at: new Date().toISOString() })
-      .eq('id', sessionId)
+    doFinish()
+  }
+  async function doFinish() {
+    setBusy(true)
+    const { error } = await finishSessionRow(sessionId)
+    setBusy(false)
     if (error) {
       logError('session.finish', error)
       alert(friendlyError(error, 'No se pudo finalizar la sesión. Intenta de nuevo.'))
       return
     }
+    setFinishAsk(false)
+    if (present) exitPresent()
     setSession(prev => ({ ...prev, status: 'finished' }))
+  }
+  async function doPause() {
+    setBusy(true)
+    const { error } = await pauseSessionRow(sessionId)
+    setBusy(false)
+    if (error) {
+      logError('session.pause', error)
+      alert(friendlyError(error, 'No se pudo pausar la sesión. Intenta de nuevo.'))
+      return
+    }
+    setFinishAsk(false)
+    if (present) exitPresent()
+    setSession(prev => ({ ...prev, status: 'paused', finished_at: null }))
+  }
+  async function doResume() {
+    setBusy(true)
+    const { error } = await resumeSessionRow(sessionId)
+    setBusy(false)
+    if (error) {
+      logError('session.resume', error)
+      alert(friendlyError(error, 'No se pudo retomar la sesión. Intenta de nuevo.'))
+      return
+    }
+    // Volver a leer la sesión: el código de escaneo pudo cambiar al retomar
+    const { data } = await supabase.from('sessions').select('status, scan_code').eq('id', sessionId).single()
+    setSession(prev => ({ ...prev, status: 'active', ...(data || {}) }))
+    autoOpenedRef.current = false   // vuelve a mostrar el código para el teléfono
   }
 
   if (!session) return (
@@ -380,6 +418,7 @@ useEffect(() => {
   const currentSlide  = slides[currentIdx]
   const totalStudents = students.length
   const isFinished    = session.status === 'finished'
+  const isPaused      = session.status === 'paused'
   const revealCorrect = isFinished && showResults
 
   // Tally for the current slide (drives the live percentage overlay)
@@ -392,6 +431,33 @@ useEffect(() => {
 
   // Sorted-by-card-id student list, reused by both the sidebar and the results grid
   const sortedStudents = [...students].sort((a, b) => a.card_id - b.card_id)
+
+  // ── Sesión pausada ──
+  if (isPaused) return (
+    <div style={{ background:'var(--bg)', minHeight:'100vh', display:'flex', alignItems:'center', justifyContent:'center', padding:'1.5rem' }}>
+      <div className="card" style={{ maxWidth:460, textAlign:'center' }}>
+        <div style={{ fontSize:'2rem', marginBottom:'.5rem' }}>⏸</div>
+        <h2 style={{ marginBottom:'.4rem' }}>Sesión pausada</h2>
+        <p style={{ color:'var(--muted)', fontSize:'.9rem', marginBottom:'.4rem' }}>
+          <strong style={{ color:'var(--text)' }}>{session.presentations?.title}</strong> · {session.courses?.name}
+        </p>
+        <p style={{ color:'var(--muted)', fontSize:'.85rem', marginBottom:'1.25rem', lineHeight:1.5 }}>
+          Quedó en la slide {currentIdx + 1} de {slides.length}. Las respuestas ya registradas se guardan.
+          Mientras esté pausada <b>no se archiva</b> en el histórico. Puedes retomarla aquí o
+          desde <b>Slides → Ejecutar</b>.
+        </p>
+        <div style={{ display:'flex', gap:'.5rem', justifyContent:'center', flexWrap:'wrap' }}>
+          <button className="btn btn-ghost" onClick={() => navigate('/presentations')}>Volver a Slides</button>
+          <button className="btn btn-ghost" onClick={() => { if (confirm('¿Finalizar la sesión sin retomarla? Se archivará con las respuestas que tiene.')) doFinish() }} disabled={busy}>
+            Finalizar así
+          </button>
+          <button className="btn btn-primary" onClick={doResume} disabled={busy}>
+            {busy ? 'Retomando…' : 'Retomar ahora'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
 
   return (
     <div style={{ background:'var(--bg)', minHeight:'100vh' }}>
@@ -633,6 +699,28 @@ useEffect(() => {
           </div>
         </div>
       </div>
+
+      {/* Finalizar antes de la última slide: pausar o finalizar */}
+      {finishAsk && (
+        <div className="modal-backdrop" onClick={() => !busy && setFinishAsk(false)}>
+          <div className="modal" style={{ maxWidth:460 }} onClick={e => e.stopPropagation()}>
+            <h2 style={{ marginBottom:'.5rem' }}>Faltan slides</h2>
+            <p style={{ color:'var(--muted)', fontSize:'.88rem', lineHeight:1.5, marginBottom:'1.25rem' }}>
+              Van en la slide {currentIdx + 1} de {slides.length}.
+              <br/><br/>
+              <b style={{ color:'var(--text)' }}>Pausar</b>: la sesión queda guardada para retomarla otro día
+              desde Slides → Ejecutar. No se archiva hasta que la finalices.
+              <br/>
+              <b style={{ color:'var(--text)' }}>Finalizar</b>: se cierra con las respuestas que tiene y se archiva esta noche.
+            </p>
+            <div className="modal-footer">
+              <button className="btn btn-ghost" onClick={() => setFinishAsk(false)} disabled={busy}>Cancelar</button>
+              <button className="btn btn-danger" onClick={doFinish} disabled={busy}>Finalizar igual</button>
+              <button className="btn btn-primary" onClick={doPause} disabled={busy}>⏸ Pausar</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {showQR && <ScanCodeModal scanCode={session?.scan_code} connected={scannerConnected} onClose={() => setShowQR(false)} />}
     </div>
